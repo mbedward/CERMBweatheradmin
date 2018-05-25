@@ -1,4 +1,6 @@
-BOM_SQL <- list(
+## SQL statements to create database tables
+
+.BOM_SQL <- list(
   create_synoptic_table = paste(
     "CREATE TABLE Synoptic (",
     "`station` INTEGER,",
@@ -33,5 +35,14 @@ BOM_SQL <- list(
     sep = "\n")
 )
 
-devtools::use_data(BOM_SQL, internal = TRUE, overwrite = TRUE)
-rm(BOM_SQL)
+
+## Flags for database connection states used by private function .ensure_connection
+
+.CON_FLAGS <- list(
+  Open = 1,
+  HasTables = 2,
+  HasData = 4
+)
+
+devtools::use_data(.BOM_SQL, .CON_FLAGS, internal = TRUE, overwrite = TRUE)
+rm(.BOM_SQL, .CON_FLAGS)

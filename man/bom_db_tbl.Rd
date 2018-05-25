@@ -2,14 +2,20 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_tbl}
 \alias{bom_db_tbl}
-\title{Gets a `tbl` object for use with dplyr functions}
+\title{Gets a \code{tbl} object for use with dplyr functions}
 \usage{
-bom_db_tbl(db, tblname = c("synoptic", "aws"))
+bom_db_tbl(con, tblname)
 }
 \arguments{
-\item{db}{Either an open connection to a SQLite database; or a character
-path to an existing database to open.}
+\item{con}{An open database connection as returned by
+\code{\link{bom_db_init}}.}
+
+\item{tblname}{One of 'Synoptic' or 'AWS'. May be abbreviated and case is
+ignored.}
+}
+\value{
+A \code{tbl} object that can be to reference this table via dplyr.
 }
 \description{
-Gets a `tbl` object for use with dplyr functions
+Gets a \code{tbl} object for use with dplyr functions
 }

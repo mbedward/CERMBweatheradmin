@@ -1,12 +1,13 @@
-#' Import weather station data from a zip file
+#' Import weather station data from a zip file as provided by BOM
 #'
-#' Imports data from a zip file, containing data sets for one or more weather
-#' stations in CSV format, into a SQLite database.
+#' Reads weather data from a zip file, in the format provided by the Bureau of
+#' Meteorology, containing data sets for one or more weather stations in CSV
+#' format, and imports them into a SQLite database. Any duplicate records are
+#' silently ignored.
 #'
 #' @param zipfile Path to the input zip file.
 #'
-#' @param db Either an open database connection or the path to a database file to
-#'   create or update.
+#' @param con An open database connection as returned by \code{\link{bom_db_init}}.
 #'
 #' @param stations Either NULL (default) to import data for all stations from
 #'   the zip file; or a character vector of station identifiers.
@@ -15,35 +16,71 @@
 #'   the function will silently ignore any that are missing in the zip file. If
 #'   FALSE, missing stations result in an error.
 #'
-#' @return Connection to the destination database.
+#' @param progress If TRUE display a progress bar during the import.
+#'   If FALSE (default), do not display a progress bar.
+#'
+#' @return A named vector giving the number of rows added to the AWS and Synoptic
+#'   tables.
 #'
 #' @export
-bom_import <- function(zipfile,
-                       db,
-                       stations = NULL,
-                       allow.missing = TRUE) {
+#'
+bom_db_import <- function(con,
+                          zipfile,
+                          stations = NULL,
+                          allow.missing = TRUE,
+                          progress = FALSE) {
 
-  browser()
-
-  con <- bom_db_init(db)
-
-  if (is.null(stations)) stations <- bom_zip_info(zipfile)[["station"]]
-
-  dats <- bom_station_data(zipfile, stations, allow.missing)
-
-  for (dat in dats) {
-    DBI::dbWriteTable(con, name = attributes(dat)$datatype, value = dat, append = TRUE)
+  # Helper function to create an SQL INSERT OR IGNORE statement
+  # for a given data frame. Assumes column names are standard and
+  # the data frame has a 'datatype' attribute corresponding to a
+  # table name.
+  .sql_insert <- function(dat) {
+    tblname <- attributes(dat)$datatype
+    params <- paste(paste0(":", colnames(dat)), collapse = ", ")
+    paste0("INSERT OR IGNORE INTO ", tblname, " VALUES (", params, ")")
   }
 
-  con
+  con <- bom_db_init(con)
+
+  # Initial record count for each table
+  Nrecs.init <- bom_db_summary(con, by = "total")
+
+  if (is.null(stations)) stations <- bom_zip_summary(zipfile)[["station"]]
+
+  dats <- bom_zip_data(zipfile, stations, allow.missing)
+
+  if (progress) pb <- txtProgressBar(max = length(dats), style = 3)
+  k <- 0
+  DBI::dbBegin(con)
+  for (dat in dats) {
+    # DBI::dbWriteTable(con, name = attributes(dat)$datatype, value = dat, append = TRUE)
+    rs <- DBI::dbSendStatement(con, .sql_insert(dat))
+    DBI::dbBind(rs, params = dat)
+    DBI::dbClearResult(rs)
+    k <- k + 1
+
+    if (progress) setTxtProgressBar(pb, k)
+  }
+  DBI::dbCommit(con)
+
+  if (progress) close(pb)
+
+  # Return a vector of number of records added to each table
+  Nrecs <- bom_db_summary(con, by = "total")
+
+  x <- Nrecs[["nrecs"]] - Nrecs.init[["nrecs"]]
+  names(x) <- Nrecs[["table"]]
+
+  x
 }
 
 
-#' Initializes a database with weather data tables as required
+#' Opens or initializes a database for weather data
 #'
-#' This function can be used to create a new database with tables for
-#' synoptic and time series data, or to check an existing database and
-#' create the required tables if they are not already present.
+#' This function can be used to open an existing database or create a new
+#' database with tables for synoptic and time series data. In the case of an
+#' existing database, the function will create tables for synoptic and AWS data
+#' if they do not already exist.
 #'
 #' @param db Either an open connection to a SQLite database; a character
 #'   path to an existing database to open; or a character path to a
@@ -53,6 +90,10 @@ bom_import <- function(zipfile,
 #'   be thrown if the database file does not already exist. If FALSE (default),
 #'   the file will be created if necessary. Ignored if \code{db} is a
 #'   connection object rather than a path string.
+#'
+#' @param copy If TRUE and \code{db} is an open database connection, the function
+#'   returns a copy of the connection. If FALSE, the returned object will be
+#'   the same as the input connection. Ignored if \code{db} is a path string.
 #'
 #' @return A connection (\code{SQLiteConnection} object) to the database.
 #'
@@ -73,16 +114,19 @@ bom_import <- function(zipfile,
 #' con <- bom_db_init(con)
 #' }
 #'
-bom_db_init <- function(db, existing = FALSE) {
+bom_db_init <- function(db, existing = FALSE, copy = FALSE) {
   if (.is_connection(db)) {
     if (!DBI::dbIsValid(db)) stop("Supplied connection is not open")
-    con <- db
+
+    if (copy) con <- DBI::dbConnect(RSQLite::SQLite(), dbname = con@dbname)
+    else con <- db
   }
   else if (is.character(db)) {
     if (existing & !file.exists(db))
       stop("Database file not found: ", db)
 
     con <- DBI::dbConnect(RSQLite::SQLite(), dbname = db)
+    copy <- FALSE
   }
   else {
     stop("Argument db should be an open database connection or a path string")
@@ -90,12 +134,12 @@ bom_db_init <- function(db, existing = FALSE) {
 
 
   if (! .db_has_table(con, "Synoptic")) {
-    res <- DBI::dbSendQuery(con, BOM_SQL$create_synoptic_table)
+    res <- DBI::dbSendQuery(con, .BOM_SQL$create_synoptic_table)
     DBI::dbClearResult(res)
   }
 
   if (! .db_has_table(con, "Aws")) {
-    res <- DBI::dbSendQuery(con, BOM_SQL$create_aws_table)
+    res <- DBI::dbSendQuery(con, .BOM_SQL$create_aws_table)
     DBI::dbClearResult(res)
   }
 
@@ -103,132 +147,101 @@ bom_db_init <- function(db, existing = FALSE) {
 }
 
 
-#' Gets a `tbl` object for use with dplyr functions
+#' Close a database connection
 #'
-#' @param db Either an open connection to a SQLite database; or a character
-#'   path to an existing database to open.
+#' Given a database connection object, this function checks whether the
+#' connection is open and, if so, closes it. After being closed, the connection
+#' object can no longer be used.
 #'
-bom_db_tbl <- function(db, tblname = c("synoptic", "aws")) {
-  tblname <- match.arg(tblname)
-  con <- bom_db_init(db, exists = TRUE)
-
-  t <- dplyr::tbl(con, tblname)
-  DBI::dbDisconnect(con)
-
-  t
-}
-
-
-#' Summarizes weather stations in a zipped data file
+#' This function is just a convenient short-cut for \code{\link[DBI]{dbIsValid}}
+#' and \code{\link[DBI]{dbDisconnect}}.
 #'
-#' This function summarizes the contents of a zip file containing data sets
-#' for one or more weather stations.
+#' @param con A database connection
 #'
-#' @param zipfile Path to the input zip file.
-#'
-#' @param include One of the following (may be abbreviated):
-#'   'data' (default) to only list stations with non-empty data sets;
-#'   'all' to list all stations;
-#'   'empty' to only list stations with empty data sets.
-#'
-#' @return A data frame with columns station (identifier); filename; filesize.
-#'
-#' @importFrom dplyr %>%
+#' @return Invisibly returns TRUE if the connection was closed, or FALSE
+#'   otherwise (e.g. the connection had been closed previously).
 #'
 #' @export
 #'
-bom_zip_info <- function(zipfile, include = c("data", "all", "empty")) {
-  include <- match.arg(include)
-
-  files <- unzip(zipfile, list = TRUE)
-
-  # Identify station data files
-  pattern <- "_Data_[_\\d]+\\.txt$"
-  ii <- stringr::str_detect(files[["Name"]], pattern)
-
-  ii <- switch(include,
-               data = ii & files[["Length"]] > 0,
-               all = ii,
-               empty = ii & files[["Length"]] == 0)
-
-  # Data file names
-  filename <- files[["Name"]][ii]
-
-  # Station IDs
-  station <- filename %>%
-    stringr::str_extract("_Data_\\d+") %>%
-    stringr::str_replace("_Data_", "")
-
-  data.frame(station, filename, filesize = files[["Length"]][ii],
-             stringsAsFactors = FALSE)
+#' @examples
+#' \dontrun{
+#' con <- bom_db_init("c:/foo/bar/weather.db")
+#'
+#' # do things with the database, then...
+#'
+#' bom_db_close(con)
+#' }
+#'
+bom_db_close <- function(con) {
+  if (.is_open_connection(con)) DBI::dbDisconnect(con)
+  else invisible(FALSE)
 }
 
 
-#' Reads raw data for specified weather stations from a zip file
+#' Gets a \code{tbl} object for use with dplyr functions
 #'
-#' @param zipfile Path to the input zip file.
+#' @param con An open database connection as returned by
+#'   \code{\link{bom_db_init}}.
 #'
-#' @param station Station identifiers as integer station numbers or character strings.
+#' @param tblname One of 'Synoptic' or 'AWS'. May be abbreviated and case is
+#'   ignored.
 #'
-#' @param allow.missing If TRUE (default), the function will return NULL if the
-#'   requested station is not found in the zip file. If FALSE, an error
-#'   is thrown if the station is missing.
-#'
-#' @param out.format One of 'list' (default) to return a named list of data frames,
-#'   or 'single' to return a single frame of data for all stations.
-#'
-#' @return If out.format is 'list', a named list, where names are station
-#'   identifiers (character strings of length six) and elements are data frames
-#'   of station data. Each data frame has an attribute 'datatype' with value 'synoptic'
-#'   or 'aws'. If out.format is 'single', a combined data frame of data for all
-#'   stations, with an attribute 'datatype'.
+#' @return A \code{tbl} object representing the table to use with dplyr.
 #'
 #' @export
 #'
-bom_station_data <- function(zipfile, stations,
-                             allow.missing = TRUE,
-                             out.format = c("list", "single")) {
+bom_db_tbl <- function(con, tblname) {
+  .ensure_connection(con, CON$Open, CON$HasTables)
 
-  out.format <- match.arg(out.format)
+  if (missing(tblname)) stop("Argument tblname must be supplied")
 
-  stn.info <- bom_zip_info(zipfile)
+  tblname <- match.arg(tolower(tblname), c("synoptic", "aws"))
 
-  id <- bom_station_id(stations)
+  dplyr::tbl(con, tblname)
+}
 
-  ii <- match(id, stn.info[["station"]])
-  if (anyNA(ii)) {
-    if (allow.missing) {
-      if (all(is.na(ii)))
-        return(NULL)  # TODO better option?
-      else
-        ii <- na.omit(ii)
 
-    } else {
-      # missing stations not allowed
-      misses <- stations[is.na(ii)]
-      stop("No data found for the following station(s)\n", misses)
-    }
+#' Gets a summary of database contents
+#'
+#' Gets the count of database records in the AWS and Synoptic tables.
+#'
+#' @param con An open database connection as returned by \code{\link{bom_db_init}}.
+#'
+#' @param by One of 'total' for total records per table, or 'station' for
+#'   count of records by weather station.
+#'
+#' @return A data frame with columns: table; station (if argument 'by' was
+#'   'station'); nrecs.
+#'
+#' @export
+#'
+bom_db_summary <- function(con, by = c("total", "station")) {
+  by = match.arg(by)
+
+  con <- bom_db_init(con, existing = TRUE, copy = TRUE)
+
+  if (by == "station") {
+    sqltxt <- "select station, count(*) as nrecs from <<tbl>> group by station"
+    empty <- data.frame(station = NA_integer_, nrecs = 0)
+  }
+  else {
+    sqltxt <- "select count(*) as nrecs from <<tbl>>"
+    empty <- data.frame(nrecs = 0)
   }
 
-  filenames <- stn.info[["filename"]][ii]
+  res <- lapply(c("AWS", "Synoptic"), function(tblname) {
+    x <- DBI::dbGetQuery(con, stringr::str_replace(sqltxt, "<<tbl>>", tblname))
+    if (nrow(x) == 0) x <- empty
+    x[["table"]] <- tblname
+    x
+  })
 
-  res <- lapply(filenames,
-                function(fname) {
-                  zcon <- unz(zipfile, fname)
-                  dat <- read.csv(zcon, stringsAsFactors = FALSE)
-                  .map_fields(dat)
-                })
+  res <- dplyr::bind_rows(res)
 
-  if (out.format == "list") {
-    names(res) <- stn.info[["station"]][ii]
-  }
-  else { # out.format == "single"
-    # Note: we assume all data is of the same type, synoptic or AWS
-    type <- attr(res[[1]], "datatype")
-    res <- dplyr::bind_rows(res)
-    attr(res, "datatype") <- type
-  }
+  if (by == "station") res <- res[, c("table", "station", "nrecs")]
+  else res <- res[, c("table", "nrecs")]
 
+  bom_db_close(con)
   res
 }
 
@@ -259,44 +272,4 @@ bom_station_id <- function(id) {
 
   id
 }
-
-
-###### Private (non exported) functions
-
-.is_connection <- function(x) inherits(x, "SQLiteConnection")
-
-.is_open_connection <- function(x) .is_connection(x) && RSQLite::dbIsValid(x)
-
-
-# Selects and renames columns in a data frame of raw data
-.map_fields <- function(dat) {
-  type <- .get_data_type(dat)
-
-  lookup <- dplyr::filter(COLUMN_LOOKUP, datatype == type)
-  ii <- match(colnames(dat), lookup[["input"]])
-  if (anyNA(ii)) stop("Unrecognized column name(s): ", colnames(dat)[is.na(ii)])
-
-  dbnames <- lookup[["db"]][ii]
-  colnames(dat) <- dbnames
-
-  dat <- dat[, !is.na(dbnames)]
-  attr(dat, "datatype") <- type
-
-  dat
-}
-
-
-.get_data_type <- function(dat.raw) {
-  if (any(stringr::str_detect(colnames(dat.raw), "precipitation.*since.*9"))) "aws"
-  else "synoptic"
-}
-
-
-.db_has_table <- function(con, tblname) {
-  if (!.is_open_connection(con))
-    stop("Database connection is not open")
-
-  tolower(tblname) %in% tolower(DBI::dbListTables(con))
-}
-
 

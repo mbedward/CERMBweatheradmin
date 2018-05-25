@@ -2,9 +2,9 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_init}
 \alias{bom_db_init}
-\title{Initializes a database with weather data tables as required}
+\title{Opens or initializes a database for weather data}
 \usage{
-bom_db_init(db, existing = FALSE)
+bom_db_init(db, existing = FALSE, copy = FALSE)
 }
 \arguments{
 \item{db}{Either an open connection to a SQLite database; a character
@@ -15,14 +15,19 @@ database to create (if argument \code{existing} is FALSE).}
 be thrown if the database file does not already exist. If FALSE (default),
 the file will be created if necessary. Ignored if \code{db} is a
 connection object rather than a path string.}
+
+\item{copy}{If TRUE and \code{db} is an open database connection, the function
+returns a copy of the connection. If FALSE, the returned object will be
+the same as the input connection. Ignored if \code{db} is a path string.}
 }
 \value{
 A connection (\code{SQLiteConnection} object) to the database.
 }
 \description{
-This function can be used to create a new database with tables for
-synoptic and time series data, or to check an existing database and
-create the required tables if they are not already present.
+This function can be used to open an existing database or create a new
+database with tables for synoptic and time series data. In the case of an
+existing database, the function will create tables for synoptic and AWS data
+if they do not already exist.
 }
 \examples{
 \dontrun{
