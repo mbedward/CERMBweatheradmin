@@ -2,22 +2,26 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_import}
 \alias{bom_db_import}
-\title{Import weather station data from a zip file as provided by BOM}
+\title{Import BOM weather station data into a database}
 \usage{
-bom_db_import(con, zipfile, stations = NULL, allow.missing = TRUE,
+bom_db_import(con, datapath, stations = NULL, allow.missing = TRUE,
   progress = FALSE)
 }
 \arguments{
 \item{con}{An open database connection as returned by \code{\link{bom_db_init}}.}
 
-\item{zipfile}{Path to the input zip file.}
+\item{datapath}{Character path to one of the following: an individual weather
+station data file in CSV format; a directory containing one or more data
+files; or a zip file containing one or more such files. Zip files are
+assumed to have a '.zip' extension.}
 
-\item{stations}{Either NULL (default) to import data for all stations from
-the zip file; or a character vector of station identifiers.}
+\item{stations}{Either NULL (default) to import data for all stations, or a
+character vector of station identifiers. Ignored if \code{datapath} is a
+single file.}
 
 \item{allow.missing}{If TRUE (default) and specific stations were requested,
-the function will silently ignore any that are missing in the zip file. If
-FALSE, missing stations result in an error.}
+the function will silently ignore any that are missing in the directory or
+zip file. If FALSE, missing stations result in an error.}
 
 \item{progress}{If TRUE display a progress bar during the import.
 If FALSE (default), do not display a progress bar.}
@@ -27,8 +31,14 @@ A named vector giving the number of rows added to the AWS and Synoptic
   tables.
 }
 \description{
-Reads weather data from a zip file, in the format provided by the Bureau of
-Meteorology, containing data sets for one or more weather stations in CSV
-format, and imports them into a SQLite database. Any duplicate records are
-silently ignored.
+This function can read delimited text data, in the format used by the Bureau
+of Meteorology, from an individual weather station file or a directory or zip
+file containing one or more such files, stations in CSV format, and import
+them into a SQLite database.
+}
+\details{
+In the case of the input data source being a directory or zip file, weather
+station files are identified by searching for names that include 'Data'
+followed by digits and underscores, with the file extension '.txt'. Any
+input records already present in the database are silently ignored.
 }

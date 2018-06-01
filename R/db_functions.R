@@ -1,20 +1,30 @@
-#' Import weather station data from a zip file as provided by BOM
+#' Import BOM weather station data into a database
 #'
-#' Reads weather data from a zip file, in the format provided by the Bureau of
-#' Meteorology, containing data sets for one or more weather stations in CSV
-#' format, and imports them into a SQLite database. Any duplicate records are
-#' silently ignored.
+#' This function can read delimited text data, in the format used by the Bureau
+#' of Meteorology, from an individual weather station file or a directory or zip
+#' file containing one or more such files, stations in CSV format, and import
+#' them into a SQLite database.
 #'
-#' @param zipfile Path to the input zip file.
+#' In the case of the input data source being a directory or zip file, weather
+#' station files are identified by searching for names that include 'Data'
+#' followed by digits and underscores, with the file extension '.txt'. Any
+#' input records already present in the database are silently ignored.
+#'
 #'
 #' @param con An open database connection as returned by \code{\link{bom_db_init}}.
 #'
-#' @param stations Either NULL (default) to import data for all stations from
-#'   the zip file; or a character vector of station identifiers.
+#' @param datapath Character path to one of the following: an individual weather
+#'   station data file in CSV format; a directory containing one or more data
+#'   files; or a zip file containing one or more such files. Zip files are
+#'   assumed to have a '.zip' extension.
+#'
+#' @param stations Either NULL (default) to import data for all stations, or a
+#'   character vector of station identifiers. Ignored if \code{datapath} is a
+#'   single file.
 #'
 #' @param allow.missing If TRUE (default) and specific stations were requested,
-#'   the function will silently ignore any that are missing in the zip file. If
-#'   FALSE, missing stations result in an error.
+#'   the function will silently ignore any that are missing in the directory or
+#'   zip file. If FALSE, missing stations result in an error.
 #'
 #' @param progress If TRUE display a progress bar during the import.
 #'   If FALSE (default), do not display a progress bar.
@@ -25,25 +35,60 @@
 #' @export
 #'
 bom_db_import <- function(con,
-                          zipfile,
+                          datapath,
                           stations = NULL,
                           allow.missing = TRUE,
                           progress = FALSE) {
 
-  # Helper function to create an SQL INSERT OR IGNORE statement
-  # for a given data frame. Assumes column names are standard and
-  # the data frame has a 'datatype' attribute corresponding to a
-  # table name.
-  .sql_insert <- function(dat) {
-    tblname <- attributes(dat)$datatype
-    params <- paste(paste0(":", colnames(dat)), collapse = ", ")
-    paste0("INSERT OR IGNORE INTO ", tblname, " VALUES (", params, ")")
-  }
+  datapath <- stringr::str_trim(datapath)
+
+  if (!(file.exists(datapath) || dir.exists(datapath)))
+    stop("Cannot access ", datapath)
 
   con <- bom_db_init(con)
 
   # Initial record count for each table
   Nrecs.init <- bom_db_summary(con, by = "total")
+
+  if (.is_zip_file(datapath))
+    .do_import_zip(con, datapath, stations, allow.missing, progress)
+
+  else if (.is_directory(datapath))
+    .do_import_dir(con, datapath, stations, allow.missing, progress)
+
+  else
+    .do_import_file(con, datapath)
+
+
+  # Return a vector of number of records added to each table
+  Nrecs <- bom_db_summary(con, by = "total")
+
+  x <- Nrecs[["nrecs"]] - Nrecs.init[["nrecs"]]
+  names(x) <- Nrecs[["table"]]
+
+  x
+}
+
+
+# Helper function to create an SQL INSERT OR IGNORE statement
+# for a given data frame. Assumes column names are standard and
+# the data frame has a 'datatype' attribute corresponding to a
+# table name.
+#
+.sql_import <- function(dat) {
+  tblname <- attributes(dat)$datatype
+  params <- paste(paste0(":", colnames(dat)), collapse = ", ")
+  paste0("INSERT OR IGNORE INTO ", tblname, " VALUES (", params, ")")
+}
+
+
+# Helper function to import data from a zip file.
+#
+.do_import_zip <- function(con,
+                           zipfile,
+                           stations = NULL,
+                           allow.missing = TRUE,
+                           progress = FALSE) {
 
   if (is.null(stations)) stations <- bom_zip_summary(zipfile)[["station"]]
 
@@ -53,8 +98,7 @@ bom_db_import <- function(con,
   k <- 0
   DBI::dbBegin(con)
   for (dat in dats) {
-    # DBI::dbWriteTable(con, name = attributes(dat)$datatype, value = dat, append = TRUE)
-    rs <- DBI::dbSendStatement(con, .sql_insert(dat))
+    rs <- DBI::dbSendStatement(con, .sql_import(dat))
     DBI::dbBind(rs, params = dat)
     DBI::dbClearResult(rs)
     k <- k + 1
@@ -64,14 +108,57 @@ bom_db_import <- function(con,
   DBI::dbCommit(con)
 
   if (progress) close(pb)
+}
 
-  # Return a vector of number of records added to each table
-  Nrecs <- bom_db_summary(con, by = "total")
 
-  x <- Nrecs[["nrecs"]] - Nrecs.init[["nrecs"]]
-  names(x) <- Nrecs[["table"]]
+# Helper function to import data from a directory containing one
+# or more weather station data files in CSV format.
+#
+.do_import_dir <- function(con,
+                           dirpath,
+                           stations = NULL,
+                           allow.missing = TRUE,
+                           progress = FALSE) {
 
-  x
+  info <- bom_dir_summary(dirpath)
+
+  if (is.null(stations)) stations <- info[["station"]]
+
+  ids <- bom_station_id(stations)
+  info <- dplyr::filter(info, station %in% ids)
+
+  if (nrow(info) > 0) {
+
+    if (progress) pb <- txtProgressBar(max = nrow(info), style = 3)
+    k <- 0
+
+    DBI::dbBegin(con)
+
+    for (i in 1:nrow(info)) {
+      if (info[[i, "filesize"]] > 0) {
+        filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
+        .do_import_file(con, filepath)
+      }
+      k <- k + 1
+      if (progress) setTxtProgressBar(pb, k)
+    }
+
+    DBI::dbCommit(con)
+
+    if (progress) close(pb)
+  }
+}
+
+
+# Helper function to import an individual CSV-format data file.
+#
+.do_import_file <- function(con, filepath) {
+  dat <- read.csv(filepath, stringsAsFactors = FALSE)
+  dat <- .map_fields(dat)
+
+  rs <- DBI::dbSendStatement(con, .sql_import(dat))
+  DBI::dbBind(rs, params = dat)
+  DBI::dbClearResult(rs)
 }
 
 

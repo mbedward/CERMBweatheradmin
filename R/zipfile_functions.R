@@ -12,8 +12,6 @@
 #'
 #' @return A data frame with columns station (identifier); filename; filesize.
 #'
-#' @importFrom dplyr %>%
-#'
 #' @export
 #'
 bom_zip_summary <- function(zipfile, include = c("data", "all", "empty")) {
@@ -34,9 +32,7 @@ bom_zip_summary <- function(zipfile, include = c("data", "all", "empty")) {
   filename <- files[["Name"]][ii]
 
   # Station IDs
-  station <- filename %>%
-    stringr::str_extract("_Data_\\d+") %>%
-    stringr::str_replace("_Data_", "")
+  station <- .extract_station_numbers(filename)
 
   data.frame(station, filename, filesize = files[["Length"]][ii],
              stringsAsFactors = FALSE)

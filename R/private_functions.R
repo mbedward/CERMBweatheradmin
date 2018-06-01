@@ -82,3 +82,35 @@
 
   tolower(tblname) %in% tolower(DBI::dbListTables(con))
 }
+
+
+.is_zip_file <- function(paths) {
+  path <- stringr::str_trim(paths)
+  stringr::str_detect(tolower(paths), "\\.zip$")
+}
+
+
+.is_directory <- function(paths) {
+  file.info(paths)$isdir
+}
+
+
+.get_file_name <- function(paths) {
+  x <- stringr::str_split(paths, "[\\\\/]+")
+  sapply(x, tail, 1)
+}
+
+
+# guards against double or mixed slashes in constructed paths
+# (there must be a more elegant alternative)
+.safe_file_path <- function(...) {
+  x <- file.path(...)
+  x <- stringr::str_split(x, "[\\\\/]+")
+  sapply(x, stringr::str_c, collapse = "/")
+}
+
+
+.extract_station_numbers <- function(filenames) {
+  x <- stringr::str_extract(filenames, "_Data_\\d+")
+  stringr::str_extract(x, "\\d+")
+}
