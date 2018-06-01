@@ -42,7 +42,7 @@
         stop("Database is missing one or both required tables AWS and Synoptic")
     }
 
-    if (is_set(flags, .CON_FLAGS$HasData)) {
+    if (is_set(.CON_FLAGS$HasData)) {
       nrecs <- bom_db_summary(con, by = "total")[["nrecs"]]
       if (!any(nrecs > 0)) stop("Database has no data records")
     }

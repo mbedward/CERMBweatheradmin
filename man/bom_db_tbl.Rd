@@ -14,8 +14,38 @@ bom_db_tbl(con, tblname)
 ignored.}
 }
 \value{
-A \code{tbl} object that can be to reference this table via dplyr.
+A \code{tbl} object representing the table to use with dplyr.
 }
 \description{
-Gets a \code{tbl} object for use with dplyr functions
+This function takes a connection to an open database, along with a table
+name ('AWS' or 'Synoptic') and returns a dplyr \code{tbl} object for the
+table that you can use with dplyr functions as if it were a data frame.
+}
+\examples{
+\dontrun{
+# Connect to a database
+con <- bom_db_init("c:/path/to/my/database.db")
+
+# Get a tbl object to use as a proxy for a chosen database table
+tsynoptic <- bom_db_tbl(con, "syn")
+
+# Field names in the table
+colnames(tsynoptic)
+
+# Use dplyr to find the maximum temperature recorded at each
+# weather station
+
+library(dplyr)
+
+dat <- tsynoptic \%>\%
+  group_by(station) \%>\%
+  summarize(maxtemp = max(temperature, na.rm = TRUE)) \%>\%
+
+  # omit records for stations with no temperature values
+  filter(!is.na(maxtemp)) \%>\%
+
+  # tell dplyr to execute this query on the database
+  collect()
+}
+
 }
