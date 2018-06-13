@@ -10,8 +10,8 @@
 #' followed by digits and underscores, with the file extension '.txt'. Any
 #' input records already present in the database are silently ignored.
 #'
-#'
-#' @param con An open database connection as returned by \code{\link{bom_db_init}}.
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
 #' @param datapath Character path to one of the following: an individual weather
 #'   station data file in CSV format; a directory containing one or more data
@@ -26,42 +26,57 @@
 #'   the function will silently ignore any that are missing in the directory or
 #'   zip file. If FALSE, missing stations result in an error.
 #'
-#' @param progress If TRUE display a progress bar during the import.
-#'   If FALSE (default), do not display a progress bar.
-#'
 #' @return A named vector giving the number of rows added to the AWS and Synoptic
 #'   tables.
 #'
 #' @export
 #'
-bom_db_import <- function(con,
+#' @examples
+#' \dontrun{
+#' # Sometime earlier at start of session
+#' DB <- bom_db_init("c:/foo/bar/weather.db", readonly = FALSE)
+#'
+#' # Import data from a BOM zip file containing individuals CSV-format
+#' # data files for weather stations
+#' bom_db_import(DB, "c:/bom/updates/some_aws.zip")
+#'
+#' # Import data from CSV-format files in a directory
+#' bom_db_import(DB, "c:/bom/archive/aws_files/")
+#'
+#' # Import data from an individual CSV-format weather station file
+#' bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
+#'
+#' # Do other things, then at end of session...
+#' bom_db_close(DB)
+#' }
+#'
+bom_db_import <- function(db,
                           datapath,
                           stations = NULL,
-                          allow.missing = TRUE,
-                          progress = FALSE) {
+                          allow.missing = TRUE) {
 
   datapath <- stringr::str_trim(datapath)
 
   if (!(file.exists(datapath) || dir.exists(datapath)))
     stop("Cannot access ", datapath)
 
-  con <- bom_db_init(con)
+  .ensure_valid_dbpool(db)
 
   # Initial record count for each table
-  Nrecs.init <- bom_db_summary(con, by = "total")
+  Nrecs.init <- bom_db_summary(db, by = "total")
 
   if (.is_zip_file(datapath))
-    .do_import_zip(con, datapath, stations, allow.missing, progress)
+    .do_import_zip(db, datapath, stations, allow.missing)
 
   else if (.is_directory(datapath))
-    .do_import_dir(con, datapath, stations, allow.missing, progress)
+    .do_import_dir(db, datapath, stations, allow.missing)
 
   else
-    .do_import_file(con, datapath)
+    .do_import_file_via_pool(db, datapath)
 
 
   # Return a vector of number of records added to each table
-  Nrecs <- bom_db_summary(con, by = "total")
+  Nrecs <- bom_db_summary(db, by = "total")
 
   x <- Nrecs[["nrecs"]] - Nrecs.init[["nrecs"]]
   names(x) <- Nrecs[["table"]]
@@ -84,41 +99,35 @@ bom_db_import <- function(con,
 
 # Helper function to import data from a zip file.
 #
-.do_import_zip <- function(con,
+.do_import_zip <- function(db,
                            zipfile,
                            stations = NULL,
-                           allow.missing = TRUE,
-                           progress = FALSE) {
+                           allow.missing = TRUE) {
 
   if (is.null(stations)) stations <- bom_zip_summary(zipfile)[["station"]]
 
   dats <- bom_zip_data(zipfile, stations, allow.missing)
 
-  if (progress) pb <- txtProgressBar(max = length(dats), style = 3)
-  k <- 0
-  DBI::dbBegin(con)
-  for (dat in dats) {
-    rs <- DBI::dbSendStatement(con, .sql_import(dat))
-    DBI::dbBind(rs, params = dat)
-    DBI::dbClearResult(rs)
-    k <- k + 1
-
-    if (progress) setTxtProgressBar(pb, k)
-  }
-  DBI::dbCommit(con)
-
-  if (progress) close(pb)
+  pool::poolWithTransaction(
+    db,
+    function(conn) {
+      for (dat in dats) {
+        rs <- DBI::dbSendStatement(conn, .sql_import(dat))
+        DBI::dbBind(rs, params = dat)
+        DBI::dbClearResult(rs)
+      }
+    }
+  )
 }
 
 
 # Helper function to import data from a directory containing one
 # or more weather station data files in CSV format.
 #
-.do_import_dir <- function(con,
+.do_import_dir <- function(db,
                            dirpath,
                            stations = NULL,
-                           allow.missing = TRUE,
-                           progress = FALSE) {
+                           allow.missing = TRUE) {
 
   info <- bom_dir_summary(dirpath)
 
@@ -128,122 +137,148 @@ bom_db_import <- function(con,
   info <- dplyr::filter(info, station %in% ids)
 
   if (nrow(info) > 0) {
+    pool::poolWithTransaction(
+      db,
+      function(conn) {
 
-    if (progress) pb <- txtProgressBar(max = nrow(info), style = 3)
-    k <- 0
-
-    DBI::dbBegin(con)
-
-    for (i in 1:nrow(info)) {
-      if (info[[i, "filesize"]] > 0) {
-        filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
-        .do_import_file(con, filepath)
+        for (i in 1:nrow(info)) {
+          if (info[[i, "filesize"]] > 0) {
+            filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
+            .do_import_file_via_connection(conn, filepath)
+          }
+        }
       }
-      k <- k + 1
-      if (progress) setTxtProgressBar(pb, k)
-    }
-
-    DBI::dbCommit(con)
-
-    if (progress) close(pb)
+    )
   }
 }
 
 
 # Helper function to import an individual CSV-format data file.
+# Uses a database connection pool object and wraps the insert in
+# a transaction.
 #
-.do_import_file <- function(con, filepath) {
+.do_import_file_via_pool <- function(dbpool, filepath) {
+  pool::poolWithTransaction(
+    dbpool,
+    function(conn) .db_import_file_via_connection(conn, filepath)
+  )
+}
+
+
+# Helper function to import an individual CSV-format data file.
+# Uses a database connection object directly.
+#
+.do_import_file_via_connection <- function(conn, filepath) {
   dat <- read.csv(filepath, stringsAsFactors = FALSE)
   dat <- .map_fields(dat)
 
-  rs <- DBI::dbSendStatement(con, .sql_import(dat))
+  rs <- DBI::dbSendStatement(conn, .sql_import(dat))
   DBI::dbBind(rs, params = dat)
   DBI::dbClearResult(rs)
 }
 
 
-#' Opens or initializes a database for weather data
+#' Creates a new database for weather data
 #'
-#' This function can be used to open an existing database or create a new
-#' database with tables for synoptic and time series data. In the case of an
-#' existing database, the function will create tables for synoptic and AWS data
-#' if they do not already exist.
+#' This function creates a new database with tables for synoptic and AWS data.
+#' SQLite databases consist of a single file which holds all tables. The file
+#' extension is arbitrary and may be omitted, but using '.db' or '.sqlite' is
+#' recommended for sanity.
 #'
-#' @param db Either an open connection to a SQLite database; a character
-#'   path to an existing database to open; or a character path to a
-#'   database to create (if argument \code{existing} is FALSE).
+#' @param dbpath A character path to the new database file. An error is thrown
+#'   if the file already exists.
 #'
-#' @param existing If TRUE and \code{db} is a path string then an error will
-#'   be thrown if the database file does not already exist. If FALSE (default),
-#'   the file will be created if necessary. Ignored if \code{db} is a
-#'   connection object rather than a path string.
-#'
-#' @param copy If TRUE and \code{db} is an open database connection, the function
-#'   returns a copy of the connection. If FALSE, the returned object will be
-#'   the same as the input connection. Ignored if \code{db} is a path string.
-#'
-#' @return A connection (\code{SQLiteConnection} object) to the database.
+#' @return A database connection pool object that can be used with other package
+#'   functions such as \code{\link{bom_db_import}} as well as with \code{dplyr}
+#'   functions. It should be closed at the end of a session with
+#'   \code{\link{bom_db_close}}.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' # Open a database file, or create it if it does not exist, and
-#' # initialize the weather data tables as required.
-#' con <- bom_db_init("c:/foo/bar/weather.db")
+#' # Create a new database file with the required weather data tables
+#' # for AWS and synoptic data
+#' DB <- bom_db_create("c:/foo/bar/weather.db")
 #'
-#' # Open an existing database file. An error is thrown if it does
-#' # not exist.
-#' con <- bom_db_init("c:/foo/bar/weather.db", existing = TRUE)
+#' # Do things with it
+#' bom_db_import(DB, "c:/foo/bar/update_aws.zip")
 #'
-#' # Pass in an open connection to a database so that
-#' # weather data tables will be created if not already present
-#' con <- bom_db_init(con)
+#' # At end of session
+#' bom_db_close(DB)
+#' }
+
+bom_db_create <- function(dbpath) {
+  if (file.exists(dbpath)) stop("File already exists: ", dbpath)
+
+  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
+
+  conn <- pool::poolCheckout(DB)
+
+  res <- DBI::dbSendQuery(conn, .BOM_SQL$create_synoptic_table)
+  DBI::dbClearResult(res)
+
+  res <- DBI::dbSendQuery(conn, .BOM_SQL$create_aws_table)
+  DBI::dbClearResult(res)
+
+  pool::poolReturn(conn)
+
+  DB
+}
+
+#' Opens a connection to an existing database
+#'
+#' This function connects an existing database and checks that it contains the
+#' required tables for synoptic and AWS data.
+#'
+#' @param dbpath A character path to an existing database file.
+#'
+#' @param readonly If TRUE (default) a read-only connection is returned. If
+#'   FALSE, a read-write connection is returned that can be used with
+#'   \code{\link{bom_db_import}}.
+#'
+#' @return A database connection pool object that can be used with other package
+#'   functions such as \code{\link{bom_db_import}} as well as with \code{dplyr}
+#'   functions. It should be closed at the end of a session with
+#'   \code{\link{bom_db_close}}.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Open a database
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#'
+#' # Do things with it
+#' bom_db_import(DB, "c:/foo/updates/some_aws.zip")
+#'
+#' # At end of session
+#' bom_db_close(DB)
 #' }
 #'
-bom_db_init <- function(db, existing = FALSE, copy = FALSE) {
-  if (.is_connection(db)) {
-    if (!DBI::dbIsValid(db)) stop("Supplied connection is not open")
+bom_db_open <- function(dbpath, readonly = TRUE) {
+  if (!file.exists(dbpath)) stop("File not found: ", dbpath)
 
-    if (copy) con <- DBI::dbConnect(RSQLite::SQLite(), dbname = con@dbname)
-    else con <- db
-  }
-  else if (is.character(db)) {
-    if (existing & !file.exists(db))
-      stop("Database file not found: ", db)
+  if (dir.exists(dbpath)) stop("Expected a file not a directory: ", dbpath)
 
-    con <- DBI::dbConnect(RSQLite::SQLite(), dbname = db)
-    copy <- FALSE
-  }
-  else {
-    stop("Argument db should be an open database connection or a path string")
-  }
+  if (readonly) flags <- RSQLite::SQLITE_RO
+  else flags <- RSQLite::SQLITE_RW
 
+  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = flags)
 
-  if (! .db_has_table(con, "Synoptic")) {
-    res <- DBI::dbSendQuery(con, .BOM_SQL$create_synoptic_table)
-    DBI::dbClearResult(res)
-  }
-
-  if (! .db_has_table(con, "Aws")) {
-    res <- DBI::dbSendQuery(con, .BOM_SQL$create_aws_table)
-    DBI::dbClearResult(res)
-  }
-
-  con
+  DB
 }
 
 
-#' Close a database connection
+#' Close the connection to a database
 #'
-#' Given a database connection object, this function checks whether the
-#' connection is open and, if so, closes it. After being closed, the connection
-#' object can no longer be used.
+#' Given a database connection pool object, as returned by
+#' \code{\link{bom_db_create}} or \code{\link{bom_db_open}}, this function
+#' checks whether the connection is open and, if so, closes it. After being
+#' closed, the connection object can no longer be used.
 #'
-#' This function is just a convenient short-cut for \code{\link[DBI]{dbIsValid}}
-#' and \code{\link[DBI]{dbDisconnect}}.
-#'
-#' @param con A database connection
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
 #' @return Invisibly returns TRUE if the connection was closed, or FALSE
 #'   otherwise (e.g. the connection had been closed previously).
@@ -252,44 +287,92 @@ bom_db_init <- function(db, existing = FALSE, copy = FALSE) {
 #'
 #' @examples
 #' \dontrun{
-#' con <- bom_db_init("c:/foo/bar/weather.db")
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
 #'
 #' # do things with the database, then...
 #'
-#' bom_db_close(con)
+#' bom_db_close(DB)
 #' }
 #'
-bom_db_close <- function(con) {
-  if (.is_open_connection(con)) DBI::dbDisconnect(con)
-  else invisible(FALSE)
+bom_db_close <- function(db) {
+  res <- FALSE
+
+  if (.is_open_connection(db)) {
+    pool::poolClose(db)
+    res <- TRUE
+  }
+
+  invisible(res)
 }
 
 
-#' Gets a \code{tbl} object for use with dplyr functions
+#' Gets a \code{tbl} object for AWS data to use with dplyr functions
 #'
-#' This function takes a connection to an open database, along with a table
-#' name ('AWS' or 'Synoptic') and returns a dplyr \code{tbl} object for the
-#' table that you can use with dplyr functions as if it were a data frame.
+#' This function takes an open connection to a database and returns a dplyr
+#' \code{tbl} object for AWS data to use with dplyr functions.
 #'
-#' @param con An open database connection as returned by
-#'   \code{\link{bom_db_init}}.
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
-#' @param tblname One of 'Synoptic' or 'AWS'. May be abbreviated and case is
-#'   ignored.
-#'
-#' @return A \code{tbl} object representing the table to use with dplyr.
+#' @return A \code{tbl} object representing the AWS table to use with dplyr.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
 #' # Connect to a database
-#' con <- bom_db_init("c:/path/to/my/database.db")
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
 #'
-#' # Get a tbl object to use as a proxy for a chosen database table
-#' tsynoptic <- bom_db_tbl(con, "syn")
+#' # Get a tbl object for AWS data
+#' taws <- bom_db_aws(db)
 #'
-#' # Field names in the table
+#' # Get the field names in the table
+#' colnames(taws)
+#'
+#' # Use dplyr to find the maximum temperature recorded at each
+#' # weather station
+#'
+#' library(dplyr)
+#'
+#' dat <- taws %>%
+#'   group_by(station) %>%
+#'   summarize(maxtemp = max(temperature, na.rm = TRUE)) %>%
+#'
+#'   # omit records for stations with no temperature values
+#'   filter(!is.na(maxtemp)) %>%
+#'
+#'   # tell dplyr to execute this query on the database
+#'   collect()
+#' }
+#'
+bom_db_aws <- function(db) {
+  .ensure_valid_dbpool(db)
+  dplyr::tbl(db, "AWS")
+}
+
+
+#' Gets a \code{tbl} object for synoptic data to use with dplyr functions
+#'
+#' This function takes an open connection to a database and returns a dplyr
+#' \code{tbl} object for synoptic data to use with dplyr functions.
+#'
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#'
+#' @return A \code{tbl} object representing the synoptic table to use with
+#'   dplyr.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Connect to a database
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#'
+#' # Get a tbl object for AWS data
+#' tsynoptic <- bom_db_aws(db)
+#'
+#' # Get the field names in the table
 #' colnames(tsynoptic)
 #'
 #' # Use dplyr to find the maximum temperature recorded at each
@@ -308,14 +391,9 @@ bom_db_close <- function(con) {
 #'   collect()
 #' }
 #'
-bom_db_tbl <- function(con, tblname) {
-  .ensure_connection(con, .CON_FLAGS$Open, .CON_FLAGS$HasTables)
-
-  if (missing(tblname)) stop("Argument tblname must be supplied")
-
-  tblname <- match.arg(tolower(tblname), c("synoptic", "aws"))
-
-  dplyr::tbl(con, tblname)
+bom_db_synoptic <- function(db) {
+  .ensure_valid_dbpool(db)
+  dplyr::tbl(db, "Synoptic")
 }
 
 
@@ -323,7 +401,8 @@ bom_db_tbl <- function(con, tblname) {
 #'
 #' Gets the count of database records in the AWS and Synoptic tables.
 #'
-#' @param con An open database connection as returned by \code{\link{bom_db_init}}.
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
 #' @param by One of 'total' for total records per table, or 'station' for
 #'   count of records by weather station.
@@ -333,10 +412,10 @@ bom_db_tbl <- function(con, tblname) {
 #'
 #' @export
 #'
-bom_db_summary <- function(con, by = c("total", "station")) {
+bom_db_summary <- function(db, by = c("total", "station")) {
   by = match.arg(by)
 
-  con <- bom_db_init(con, existing = TRUE, copy = TRUE)
+  .ensure_valid_dbpool(db)
 
   if (by == "station") {
     sqltxt <- "select station, count(*) as nrecs from <<tbl>> group by station"
@@ -348,7 +427,7 @@ bom_db_summary <- function(con, by = c("total", "station")) {
   }
 
   res <- lapply(c("AWS", "Synoptic"), function(tblname) {
-    x <- DBI::dbGetQuery(con, stringr::str_replace(sqltxt, "<<tbl>>", tblname))
+    x <- DBI::dbGetQuery(db, stringr::str_replace(sqltxt, "<<tbl>>", tblname))
     if (nrow(x) == 0) x <- empty
     x[["table"]] <- tblname
     x
@@ -359,7 +438,6 @@ bom_db_summary <- function(con, by = c("total", "station")) {
   if (by == "station") res <- res[, c("table", "station", "nrecs")]
   else res <- res[, c("table", "nrecs")]
 
-  bom_db_close(con)
   res
 }
 

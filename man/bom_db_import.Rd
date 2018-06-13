@@ -4,11 +4,11 @@
 \alias{bom_db_import}
 \title{Import BOM weather station data into a database}
 \usage{
-bom_db_import(con, datapath, stations = NULL, allow.missing = TRUE,
-  progress = FALSE)
+bom_db_import(db, datapath, stations = NULL, allow.missing = TRUE)
 }
 \arguments{
-\item{con}{An open database connection as returned by \code{\link{bom_db_init}}.}
+\item{db}{A database connection pool object as returned by
+\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
 
 \item{datapath}{Character path to one of the following: an individual weather
 station data file in CSV format; a directory containing one or more data
@@ -22,9 +22,6 @@ single file.}
 \item{allow.missing}{If TRUE (default) and specific stations were requested,
 the function will silently ignore any that are missing in the directory or
 zip file. If FALSE, missing stations result in an error.}
-
-\item{progress}{If TRUE display a progress bar during the import.
-If FALSE (default), do not display a progress bar.}
 }
 \value{
 A named vector giving the number of rows added to the AWS and Synoptic
@@ -41,4 +38,24 @@ In the case of the input data source being a directory or zip file, weather
 station files are identified by searching for names that include 'Data'
 followed by digits and underscores, with the file extension '.txt'. Any
 input records already present in the database are silently ignored.
+}
+\examples{
+\dontrun{
+# Sometime earlier at start of session
+DB <- bom_db_init("c:/foo/bar/weather.db", readonly = FALSE)
+
+# Import data from a BOM zip file containing individuals CSV-format
+# data files for weather stations
+bom_db_import(DB, "c:/bom/updates/some_aws.zip")
+
+# Import data from CSV-format files in a directory
+bom_db_import(DB, "c:/bom/archive/aws_files/")
+
+# Import data from an individual CSV-format weather station file
+bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
+
+# Do other things, then at end of session...
+bom_db_close(DB)
+}
+
 }

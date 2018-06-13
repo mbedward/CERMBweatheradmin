@@ -2,33 +2,31 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_close}
 \alias{bom_db_close}
-\title{Close a database connection}
+\title{Close the connection to a database}
 \usage{
-bom_db_close(con)
+bom_db_close(db)
 }
 \arguments{
-\item{con}{A database connection}
+\item{db}{A database connection pool object as returned by
+\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
 }
 \value{
 Invisibly returns TRUE if the connection was closed, or FALSE
   otherwise (e.g. the connection had been closed previously).
 }
 \description{
-Given a database connection object, this function checks whether the
-connection is open and, if so, closes it. After being closed, the connection
-object can no longer be used.
-}
-\details{
-This function is just a convenient short-cut for \code{\link[DBI]{dbIsValid}}
-and \code{\link[DBI]{dbDisconnect}}.
+Given a database connection pool object, as returned by
+\code{\link{bom_db_create}} or \code{\link{bom_db_open}}, this function
+checks whether the connection is open and, if so, closes it. After being
+closed, the connection object can no longer be used.
 }
 \examples{
 \dontrun{
-con <- bom_db_init("c:/foo/bar/weather.db")
+DB <- bom_db_open("c:/foo/bar/weather.db")
 
 # do things with the database, then...
 
-bom_db_close(con)
+bom_db_close(DB)
 }
 
 }

@@ -4,10 +4,11 @@
 \alias{bom_db_summary}
 \title{Gets a summary of database contents}
 \usage{
-bom_db_summary(con, by = c("total", "station"))
+bom_db_summary(db, by = c("total", "station"))
 }
 \arguments{
-\item{con}{An open database connection as returned by \code{\link{bom_db_init}}.}
+\item{db}{A database connection pool object as returned by
+\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
 
 \item{by}{One of 'total' for total records per table, or 'station' for
 count of records by weather station.}

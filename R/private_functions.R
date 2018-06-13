@@ -1,10 +1,22 @@
 ###### Private (non exported) functions and variables
 
-.is_connection <- function(x) inherits(x, "SQLiteConnection")
+.ensure_valid_dbpool <- function(x) {
+  if (!.is_connection(x)) stop("Object is not a database connection pool")
 
-.is_open_connection <- function(x) .is_connection(x) && RSQLite::dbIsValid(x)
+  if (!DBI::dbIsValid(pool))
+    stop("Database connection pool has been closed or was not initialized properly")
+}
+
+.is_connection <- function(x) {
+  cl <- inherits(x, c("Pool", "R6"), which = TRUE)
+  all(cl == c(1,2))
+}
+
+.is_open_connection <- function(x) .is_connection(x) && DBI::dbIsValid(x)
 
 
+## TODO - do we need this function anymore?
+##
 .ensure_connection <- function(x, ...) {
   if (!.is_connection(x)) stop("Object is not a database connection")
 
@@ -76,6 +88,9 @@
 }
 
 
+## TODO - do we need this function now?  It is only used by
+## .ensure_connection
+##
 .db_has_table <- function(con, tblname) {
   if (!.is_open_connection(con))
     stop("Database connection is not open")
