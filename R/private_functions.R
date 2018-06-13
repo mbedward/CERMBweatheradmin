@@ -3,7 +3,7 @@
 .ensure_valid_dbpool <- function(x) {
   if (!.is_connection(x)) stop("Object is not a database connection pool")
 
-  if (!DBI::dbIsValid(pool))
+  if (!DBI::dbIsValid(x))
     stop("Database connection pool has been closed or was not initialized properly")
 }
 

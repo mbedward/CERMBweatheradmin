@@ -160,7 +160,7 @@ bom_db_import <- function(db,
 .do_import_file_via_pool <- function(dbpool, filepath) {
   pool::poolWithTransaction(
     dbpool,
-    function(conn) .db_import_file_via_connection(conn, filepath)
+    function(conn) .do_import_file_via_connection(conn, filepath)
   )
 }
 

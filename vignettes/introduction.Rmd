@@ -39,6 +39,7 @@ You will need the following packages installed:
   * DBI - general database functions
   * dbplyr - allows dplyr to be used with database tables
   * dplyr - functions to work with data frames
+  * pool - provides a pool of database connections
   * RSQLite - specific functions for SQLite databases
   * stringr - functions to query and manipulate character strings
   
@@ -46,7 +47,7 @@ These should be included as part of the install from GitHub but if not, the foll
 
 ```{r eval = FALSE}
 
-install.packages(c("DBI", "dbplyr", "dplyr", "RSQLite", "stringr"))
+install.packages(c("DBI", "dbplyr", "dplyr", "pool", "RSQLite", "stringr"))
 
 ```
 
@@ -143,11 +144,11 @@ The code below creates a new database with a specified path and file name (SQLit
 ```{r}
 
 # Create a new database with the required tables
-con <- bom_db_init("c:/michael/Rworkspaces/BOMdata/database/test.db")
+DB <- bom_db_create("c:/michael/Rworkspaces/BOMdata/database/test.db")
 
 ```
 
-The object returned by the function is a database connection (an object of class `SQLiteConnection`). We can use it to import data into the database and, later, to query records in the database.
+The object `DB` returned by the function is a database connection pool (an object of class `Pool` defined in the `pool` package). We can use it to import data into the database and, later, to query records in the database.
 
 
 ### Importing data from zip files
@@ -158,7 +159,7 @@ Import data from the synoptic zip file:
 
 ```{r}
 
-bom_db_import(con, SYNOPTIC)
+bom_db_import(DB, SYNOPTIC)
 
 ```
 
@@ -167,7 +168,7 @@ Import data from the AWS zip file:
 
 ```{r}
 
-bom_db_import(con, AWS)
+bom_db_import(DB, AWS)
 
 ```
 
@@ -175,7 +176,7 @@ The import function silently ignores any weather station records that are alread
 
 ```{r}
 
-bom_db_import(con, AWS)
+bom_db_import(DB, AWS)
 
 ```
 
@@ -188,7 +189,7 @@ When passed a directory path rather than a zip file path, the `bom_db_import` fu
 
 path <- file.path(DIR, "rawfiles", "Synoptic")
 
-bom_db_import(con, path)
+bom_db_import(DB, path)
 
 ```
 
@@ -201,7 +202,7 @@ The `bom_db_import` will also work with an individual file.
 
 path <- file.path(DIR, "rawfiles", "AWS", "HM01X_Data_200284_999999999515424.txt")
 
-bom_db_import(con, path)
+bom_db_import(DB, path)
 
 ```
 
@@ -215,7 +216,7 @@ Count synoptic and AWS records:
 
 ```{r}
 
-bom_db_summary(con)
+bom_db_summary(DB)
 
 ```
 
@@ -223,7 +224,7 @@ Count records by station:
 
 ```{r}
 
-dat <- bom_db_summary(con, by = "station")
+dat <- bom_db_summary(DB, by = "station")
 
 head(dat, 3)
 tail(dat, 3)
@@ -237,7 +238,7 @@ The code below finds the maximum recorded temperature for each weather station.
 ```{r}
 
 # Get a dplyr `tbl` object for the Synoptic table
-tsynoptic <- bom_db_tbl(con, "syn")
+tsynoptic <- bom_db_synoptic(DB)
 
 # Find maximum temperature for each station
 dat <- tsynoptic %>%
@@ -266,7 +267,7 @@ qry <- paste(
   "GROUP BY STATION",
   "HAVING NOT(maxtemp IS NULL)")
 
-dat2 <- DBI::dbGetQuery(con, qry)
+dat2 <- DBI::dbGetQuery(DB, qry)
 
 ```
 
@@ -286,7 +287,7 @@ Closing a connection will also close any `tbl` objects associated with it.
 
 ```{r}
 
-bom_db_close(con)
+bom_db_close(DB)
 
 ```
 

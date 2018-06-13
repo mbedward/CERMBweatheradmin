@@ -1,6 +1,6 @@
 Package: CERMBweather
 Title: Functions to manage and query Australian weather data
-Version: 0.1.9003
+Version: 0.1.9004
 Date: 2018-06-13
 Authors@R: c(
   person("Hamish", "Clarke", email = "hamishc@uow.edu.au", role = c("aut")),
