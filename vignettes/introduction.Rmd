@@ -253,7 +253,7 @@ dat <- tsynoptic %>%
 # Display results
 plot(density(dat$maxtemp), 
      xlab = "temperature", ylab = "density",
-     main = "Maximum recorded temperatute at each station")
+     main = "Max temperatures")
 
 ```
 
