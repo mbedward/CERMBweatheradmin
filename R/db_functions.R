@@ -60,7 +60,7 @@ bom_db_import <- function(db,
   if (!(file.exists(datapath) || dir.exists(datapath)))
     stop("Cannot access ", datapath)
 
-  .ensure_valid_dbpool(db)
+  .ensure_connection(db)
 
   # Initial record count for each table
   Nrecs.init <- bom_db_summary(db, by = "total")
@@ -266,6 +266,8 @@ bom_db_open <- function(dbpath, readonly = TRUE) {
 
   DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = flags)
 
+  .ensure_connection(DB)
+
   DB
 }
 
@@ -346,7 +348,7 @@ bom_db_close <- function(db) {
 #' }
 #'
 bom_db_aws <- function(db) {
-  .ensure_valid_dbpool(db)
+  .ensure_connection(db)
   dplyr::tbl(db, "AWS")
 }
 
@@ -392,7 +394,7 @@ bom_db_aws <- function(db) {
 #' }
 #'
 bom_db_synoptic <- function(db) {
-  .ensure_valid_dbpool(db)
+  .ensure_connection(db)
   dplyr::tbl(db, "Synoptic")
 }
 
@@ -415,7 +417,7 @@ bom_db_synoptic <- function(db) {
 bom_db_summary <- function(db, by = c("total", "station")) {
   by = match.arg(by)
 
-  .ensure_valid_dbpool(db)
+  .ensure_connection(db)
 
   if (by == "station") {
     sqltxt <- "select station, count(*) as nrecs from <<tbl>> group by station"

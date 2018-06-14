@@ -148,7 +148,28 @@ DB <- bom_db_create("c:/michael/Rworkspaces/BOMdata/database/test.db")
 
 ```
 
-The object `DB` returned by the function is a database connection pool (an object of class `Pool` defined in the `pool` package). We can use it to import data into the database and, later, to query records in the database.
+The object `DB` returned by the function is a database connection pool (an object of class `Pool` defined in the `pool` package). It serves as a connection or proxy for the database that can be used to import and retrieve data.
+
+### Opening an existing database
+
+You can access an existing database from R with the `bom_db_open` function. This function checks that the file exists and that it contains database tables for AWS and synoptic data. By default it returns a read-only connection that allows you to query data but not modify the database itself. You only need to do this once, at the start of an R session.
+
+```{r eval=FALSE}
+
+# Open the database in read-only mode
+DB <- bom_db_open("c:/michael/Rworkspaces/BOMdata/database/test.db")
+
+```
+
+
+When you need a database connection that allows new data to be imported into the database you supply an extra argument to the `bom_db_open` function. 
+
+```{r eval = FALSE}
+
+DB <- bom_db_open("c:/michael/Rworkspaces/BOMdata/database/test.db", readonly = FALSE)
+
+```
+
 
 
 ### Importing data from zip files
@@ -159,6 +180,10 @@ Import data from the synoptic zip file:
 
 ```{r}
 
+# Open read-write connection to the database
+DB <- bom_db_open("c:/michael/Rworkspaces/BOMdata/database/test.db", readonly = FALSE)
+
+# Import data from zip file containing synoptic data files for weather stations
 bom_db_import(DB, SYNOPTIC)
 
 ```
@@ -189,6 +214,7 @@ When passed a directory path rather than a zip file path, the `bom_db_import` fu
 
 path <- file.path(DIR, "rawfiles", "Synoptic")
 
+# DB is a read-write database connection (see earlier examples)
 bom_db_import(DB, path)
 
 ```
@@ -202,7 +228,18 @@ The `bom_db_import` will also work with an individual file.
 
 path <- file.path(DIR, "rawfiles", "AWS", "HM01X_Data_200284_999999999515424.txt")
 
+# DB is a read-write database connection (see earlier examples)
 bom_db_import(DB, path)
+
+```
+
+### Closing the database
+
+At the end of an R session it is a good idea to close the database connection and delete the connection. Nothing terrible will happen if you fail to do this, but a connection object saved from a previous session will not work.
+
+```{r}
+
+bom_db_close(DB)
 
 ```
 
@@ -215,6 +252,9 @@ Once we have some data in the database we can extract or summarize data in a var
 Count synoptic and AWS records:
 
 ```{r}
+
+# Open a database connection at the start of your R session
+DB <- bom_db_open("c:/michael/Rworkspaces/BOMdata/database/test.db")
 
 bom_db_summary(DB)
 
@@ -231,11 +271,12 @@ tail(dat, 3)
 
 ```
 
-Arbitrary queries can be done using `dplyr` package functions and `tbl` objects which act as proxies for database tables, allowing them to be treated like data frames.
-
-The code below finds the maximum recorded temperature for each weather station.
+Arbitrary queries can be done using `dplyr` package functions and `tbl` objects which act as proxies for database tables, allowing them to be treated like data frames. You can either create these on the fly as part of a pipeline of dplyr commands, or store a reference to the table as in the example below. The stored `tbl` object can then be used repeatedly as long as the associated database connection remains open.
 
 ```{r}
+
+# Query synoptic data and find the maximum temperature recorded 
+# for each weather station
 
 # Get a dplyr `tbl` object for the Synoptic table
 tsynoptic <- bom_db_synoptic(DB)
@@ -257,8 +298,39 @@ plot(density(dat$maxtemp),
 
 ```
 
+The sequence of dplyr commands in the above query is the same as would be used with an ordinary data frame except for the last `collect` function. This tells dplyr to execute the query on the database and retrieve the results. Up to that point dplyr has simply constructed a query ready to use. Sometimes it is convenient to construct one or more queries but delay their evaluation until later, perhaps conditional on other variables.
 
-The query above could also be performed using an SQL statement via the `DBI` package.
+```{r}
+
+# Construct a dplyr query
+qry <- tsynoptic %>%
+  group_by(station) %>%
+  summarize(maxtemp = max(temperature, na.rm = TRUE)) %>%
+  filter(!is.na(maxtemp))
+  
+# Printing the query will cause dplyr to get the first few rows of the result
+qry
+
+```
+
+```{r}
+
+# Use collect() to retrieve all results
+dat <- collect(qry)
+  
+```
+
+
+Behind the scenes, dplyr is constructing an SQL query to submit to the database. You can examine the SQL statements with the dplyr `show_query` function.
+
+```{r}
+
+show_query(qry)
+
+```
+
+
+You can also submit your own SQL queries to the database directly. Note that for complex queries with variable parameters you will probably want to use the `glue_sql` function from the `glue` package to construct the query rather than the base R `paste` or `sprintf` functions.
 
 ```{r}
 
@@ -279,13 +351,7 @@ all.equal(dat, dat2)
 
 ```
 
-
-
-### Closing the database connection
-
-Closing a connection will also close any `tbl` objects associated with it.
-
-```{r}
+```{r include=FALSE, eval=TRUE}
 
 bom_db_close(DB)
 
