@@ -178,7 +178,7 @@ bom_db_import <- function(db,
 }
 
 
-#' Creates a new database for weather data
+#' Create a new database for weather data
 #'
 #' This function creates a new database with tables for synoptic and AWS data.
 #' SQLite databases consist of a single file which holds all tables. The file
@@ -226,14 +226,16 @@ bom_db_create <- function(dbpath) {
   DB
 }
 
-#' Opens a connection to an existing database
+#' Open a connection to an existing database
 #'
 #' This function connects an existing database and checks that it contains the
-#' required tables for synoptic and AWS data.
+#' required tables for synoptic and AWS data. By default, it returns a read-only
+#' connection.
 #'
 #' @param dbpath A character path to an existing database file.
 #'
-#' @param readonly If TRUE (default) a read-only connection is returned. If
+#' @param readonly If TRUE (default) a read-only connection is returned that
+#'   you can use to query the database but not to import new data. If
 #'   FALSE, a read-write connection is returned that can be used with
 #'   \code{\link{bom_db_import}}.
 #'
@@ -272,7 +274,7 @@ bom_db_open <- function(dbpath, readonly = TRUE) {
 }
 
 
-#' Close the connection to a database
+#' Close a connection to a database
 #'
 #' Given a database connection pool object, as returned by
 #' \code{\link{bom_db_create}} or \code{\link{bom_db_open}}, this function
@@ -305,6 +307,81 @@ bom_db_close <- function(db) {
   }
 
   invisible(res)
+}
+
+
+#' Check if a database connection is read-only
+#'
+#' Checks if the given database connection is read-only, ie. can be used to
+#' retrieve data but not import new data. An error is issued if \code{db}
+#' is not a currently open connection to a weather database.
+#'
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#'
+#' @return TRUE if the connection is read-only; or FALSE if it supports write
+#'   operations.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#'
+#' # This will return TRUE
+#' bom_db_readonly(DB)
+#'
+#' # Re-open connection with write permission
+#' bom_db_close(DB)
+#' DB <- bom_db_open("c:/foo/bar/weather.db", readonly = FALSE)
+#'
+#' # Now this will return FALSE
+#' bom_db_readonly(DB)
+#' }
+#'
+bom_db_readonly <- function(db) {
+  .ensure_connection(db)
+
+  con <- pool::poolCheckout(db)
+  flags <- con@flags
+  pool::poolReturn(con)
+
+  bitwAnd(flags, RSQLite::SQLITE_RO) > 0
+}
+
+
+#' Check if a database connection supports read and write operations
+#'
+#' Checks if the given database connection can be used for write operations
+#' (importing new data) as well as read operations (querying and retrieving
+#' data). An error is issued if \code{db} is not a currently open connection to
+#' a weather database.
+#'
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#'
+#' @return TRUE if the connection supports write operations; or FALSE if it is
+#'   read-only.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#'
+#' # This will return FALSE
+#' bom_db_readwrite(DB)
+#'
+#' # Re-open connection with write permission
+#' bom_db_close(DB)
+#' DB <- bom_db_open("c:/foo/bar/weather.db", readonly = FALSE)
+#'
+#' # Now this will return TRUE
+#' bom_db_readwrite(DB)
+#' }
+#'
+bom_db_readwrite <- function(db) {
+  !bom_db_readonly(db)
 }
 
 

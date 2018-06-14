@@ -2,7 +2,7 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_create}
 \alias{bom_db_create}
-\title{Creates a new database for weather data}
+\title{Create a new database for weather data}
 \usage{
 bom_db_create(dbpath)
 }

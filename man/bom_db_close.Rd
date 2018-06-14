@@ -2,7 +2,7 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_close}
 \alias{bom_db_close}
-\title{Close the connection to a database}
+\title{Close a connection to a database}
 \usage{
 bom_db_close(db)
 }

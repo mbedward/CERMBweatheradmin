@@ -27,7 +27,7 @@
 # Checks that AWS and Synoptic tables are present
 .is_weather_db <- function(x) {
   tbls <- DBI::dbListTables(x)
-  all(c("synoptic", "aws") %in% tbls)
+  all(c("synoptic", "aws") %in% tolower(tbls))
 }
 
 
