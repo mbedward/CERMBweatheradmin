@@ -508,7 +508,7 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
     empty <- data.frame(station = NA_integer_, nrecs = 0)
   }
   else { # by == "total"
-    if (approx) sqltxt <- "SELECT MAX(ROWID) FROM {`tbl`}"
+    if (approx) sqltxt <- "SELECT MAX(ROWID) AS nrecs FROM {`tbl`}"
     else sqltxt <- "SELECT COUNT(*) AS nrecs FROM {`tbl`}"
     empty <- data.frame(nrecs = 0)
   }
@@ -516,7 +516,7 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
   res <- lapply(c("AWS", "Synoptic"), function(tblname) {
     sql <- glue::glue_sql(sqltxt, .con=db, tbl=tblname)
     x <- DBI::dbGetQuery(db, sql)
-    if (nrow(x) == 0) x <- empty
+    if ( nrow(x) == 0 || is.na(x[["nrecs"]]) ) x <- empty
     x[["table"]] <- tblname
     x
   })

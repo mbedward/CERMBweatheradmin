@@ -39,6 +39,7 @@ You will need the following packages installed:
   * DBI - general database functions
   * dbplyr - allows dplyr to be used with database tables
   * dplyr - functions to work with data frames
+  * glue - functions to construct strings and SQL queries
   * pool - provides a pool of database connections
   * RSQLite - specific functions for SQLite databases
   * stringr - functions to query and manipulate character strings
@@ -47,7 +48,7 @@ These should be included as part of the install from GitHub but if not, the foll
 
 ```{r eval = FALSE}
 
-install.packages(c("DBI", "dbplyr", "dplyr", "pool", "RSQLite", "stringr"))
+install.packages(c("DBI", "dbplyr", "dplyr", "glue", "pool", "RSQLite", "stringr"))
 
 ```
 
@@ -141,7 +142,7 @@ In R, tables in a SQLite database can be queried in much the same way as when wo
 
 The code below creates a new database with a specified path and file name (SQLite does not require any particular file name convention) containing tables for synoptic and AWS data.
 
-```{r}
+```{r eval=FALSE}
 
 # Create a new database with the required tables
 DB <- bom_db_create("c:/michael/Rworkspaces/BOMdata/database/test.db")
