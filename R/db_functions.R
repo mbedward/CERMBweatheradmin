@@ -486,27 +486,36 @@ bom_db_synoptic <- function(db) {
 #' @param by One of 'total' for total records per table, or 'station' for
 #'   count of records by weather station.
 #'
+#' @param approx If TRUE (default) and \code{by == "total"} return an
+#'   approximate record count based on the maximum RowID for each table. This is
+#'   almost instant whereas a full record count is very slow (minutes rather
+#'   than seconds) for large tables. However, it is approximate because RowID is
+#'   an automatically incremented variable that does not account for any
+#'   previously deleted records. Ignored when \code{by == "station"}.
+#'
 #' @return A data frame with columns: table; station (if argument 'by' was
 #'   'station'); nrecs.
 #'
 #' @export
 #'
-bom_db_summary <- function(db, by = c("total", "station")) {
+bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
   by = match.arg(by)
 
   .ensure_connection(db)
 
   if (by == "station") {
-    sqltxt <- "select station, count(*) as nrecs from <<tbl>> group by station"
+    sqltxt <- "SELECT station, COUNT(*) AS nrecs FROM {`tbl`} GROUP BY station"
     empty <- data.frame(station = NA_integer_, nrecs = 0)
   }
-  else {
-    sqltxt <- "select count(*) as nrecs from <<tbl>>"
+  else { # by == "total"
+    if (approx) sqltxt <- "SELECT MAX(ROWID) FROM {`tbl`}"
+    else sqltxt <- "SELECT COUNT(*) AS nrecs FROM {`tbl`}"
     empty <- data.frame(nrecs = 0)
   }
 
   res <- lapply(c("AWS", "Synoptic"), function(tblname) {
-    x <- DBI::dbGetQuery(db, stringr::str_replace(sqltxt, "<<tbl>>", tblname))
+    sql <- glue::glue_sql(sqltxt, .con=db, tbl=tblname)
+    x <- DBI::dbGetQuery(db, sql)
     if (nrow(x) == 0) x <- empty
     x[["table"]] <- tblname
     x

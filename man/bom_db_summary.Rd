@@ -4,7 +4,7 @@
 \alias{bom_db_summary}
 \title{Gets a summary of database contents}
 \usage{
-bom_db_summary(db, by = c("total", "station"))
+bom_db_summary(db, by = c("total", "station"), approx = TRUE)
 }
 \arguments{
 \item{db}{A database connection pool object as returned by
@@ -12,6 +12,13 @@ bom_db_summary(db, by = c("total", "station"))
 
 \item{by}{One of 'total' for total records per table, or 'station' for
 count of records by weather station.}
+
+\item{approx}{If TRUE (default) and \code{by == "total"} return an
+approximate record count based on the maximum RowID for each table. This is
+almost instant whereas a full record count is very slow (minutes rather
+than seconds) for large tables. However, it is approximate because RowID is
+an automatically incremented variable that does not account for any
+previously deleted records. Ignored when \code{by == "station"}.}
 }
 \value{
 A data frame with columns: table; station (if argument 'by' was
