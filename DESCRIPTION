@@ -14,6 +14,7 @@ Depends: R (>= 3.4.0)
 Imports: DBI,
   dbplyr,
   dplyr,
+  glue,
   pool,
   RSQLite,
   stringr
