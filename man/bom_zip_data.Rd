@@ -4,8 +4,12 @@
 \alias{bom_zip_data}
 \title{Reads raw data for specified weather stations from a zip file}
 \usage{
-bom_zip_data(zipfile, stations, allow.missing = TRUE, out.format = c("list",
-  "single"))
+bom_zip_data(
+  zipfile,
+  stations,
+  allow.missing = TRUE,
+  out.format = c("list", "single")
+)
 }
 \arguments{
 \item{zipfile}{Path to the input zip file.}
