@@ -1,7 +1,7 @@
 Package: CERMBweather
 Title: Functions to manage and query Australian weather data
-Version: 0.2.0
-Date: 2020-03-23
+Version: 0.2.3
+Date: 2020-03-25
 Authors@R: c(
   person("Hamish", "Clarke", email = "hamishc@uow.edu.au", role = c("aut")),
   person("Meaghan", "Jenkins", email = "mjenkins@uow.edu.au", role = c("aut")),
@@ -10,7 +10,7 @@ Description: Tools developed by the Centre for Environmental Risk Management
   of Bushfires, University of Wollongong (Australia) to manage and query weather 
   data provided by the Australian Bureau of Meteorology, and to calculate fire and
   weather-related indices.
-Depends: R (>= 3.4.0)
+Depends: R (>= 3.6.0)
 Imports: DBI,
   dbplyr,
   dplyr,
