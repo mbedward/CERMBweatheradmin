@@ -12,10 +12,19 @@
 #'   reference period over which average annual rainfall at each weather station
 #'   should be calculated. This is used in the KBDI calculation. Normally the
 #'   reference period will be a sequence of contiguous years, but it does not
-#'   have to be. Default is \code{2001:2015}.
+#'   have to be. Default is \code{2001:2015}. Ignored if a value for
+#'   \code{av.rainfall.value} is provided.
 #'
 #' @param min.days.per.year The minimum number of days of rainfall data required
 #'   for each year specified by \code{av.rainfall.years}. Default is \code{300}.
+#'   Ignored if a value for \code{av.rainfall.value} is provided.
+#'
+#' @param av.rainfall.value A vector of average annual rainfall values to use
+#'   instead of calculating averages from weather station data. The vector
+#'   should either consist of a single value to use for all weather stations in
+#'   the input data, or it should provide a value for each station. The default
+#'   (\code{NULL}) means to calculate average annual values from the station
+#'   data.
 #'
 #' @return A data frame with columns:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',}
@@ -42,6 +51,15 @@
 #' # Calculate FFDI for stations
 #' ffdi <- bom_db_ffdi(dat)
 #'
+#' # Calculate FFDI for stations using non-default range of years
+#' # for average annual rainfall
+#' ffdi <- bom_db_ffdi(dat, av.rainfall.years = 1981:2010)
+#'
+#' # Calculate FFDI for stations using a single value for
+#' # average annual rainfall for all weather stations in the
+#' # input data
+#' ffdi <- bom_db_ffdi(dat, av.rainfall.value = 900)
+#'
 #' # If you want to relate FFDI and drought factor values to the
 #' # original sub-daily weather values, join to input data
 #' ffdi <- left_join(dat, ffdi,
@@ -54,7 +72,8 @@
 #'
 bom_db_ffdi <- function(dat,
                         av.rainfall.years = 2001:2015,
-                        min.days.per.year = 300) {
+                        min.days.per.year = 300,
+                        av.rainfall.value = NULL) {
 
   colnames(dat) <- tolower(colnames(dat))
 
@@ -68,11 +87,27 @@ bom_db_ffdi <- function(dat,
   }
 
   stations <- unique(dat$station)
+  nstns <- length(stations)
 
-  res <- lapply(stations, function(the.stn) {
+  if (!is.null(av.rainfall.value)) {
+    nval <- length(av.rainfall.value)
+    if (nval != nstns) {
+      if (nval == 1) {
+        av.rainfall.value <- rep(av.rainfall.value, nstns)
+      } else {
+        stop("av.rainfall.value should be length 1 or ", nstns, " (number of stations)")
+      }
+    }
+  }
+
+  res <- lapply(1:nstns, function(istn) {
+    the.stn <- stations[istn]
+    the.av.rainfall <- av.rainfall.value[istn]
+
     .do_calculate_ffdi(dat %>% dplyr::filter(station == the.stn),
                        av.rainfall.years,
-                       min.days.per.year)
+                       min.days.per.year,
+                       the.av.rainfall)
   })
 
   dplyr::bind_rows(res)
@@ -81,11 +116,16 @@ bom_db_ffdi <- function(dat,
 
 # Private worker function for bom_db_ffdi
 #
-.do_calculate_ffdi <- function(dat.stn, av.rainfall.years, min.days.per.year) {
+.do_calculate_ffdi <- function(dat.stn,
+                               av.rainfall.years,
+                               min.days.per.year,
+                               av.rainfall = NULL) {
 
-  # Value to use when drought factor is zero so that the log(DF) term
-  # in FFDI calculation does not result in missing values
-  MinDroughtFactor = 1e-3
+  # Check we only have data for a single station and av.rainfall
+  # (if provided) is a single positive value
+  stopifnot(dplyr::n_distinct(dat.stn$station) == 1,
+            is.null(av.rainfall) ||
+              (length(av.rainfall) == 1 && av.rainfall > 0))
 
   dat.stn <- dat.stn %>%
     # Ensure only one record per time point (this will arbitrarily
@@ -95,23 +135,24 @@ bom_db_ffdi <- function(dat,
     # Treat missing rainfall values as zero (least worst option)
     dplyr::mutate(precipitation = ifelse(is.na(precipitation), 0, precipitation))
 
+  if (is.null(av.rainfall)) {
+    # Calculate average annual rainfall over the reference years
+    x <- dat.stn %>%
+      dplyr::filter(year %in% av.rainfall.years) %>%
+      dplyr::group_by(year) %>%
+      dplyr::summarize(ndays = dplyr::n_distinct(month, day),
+                       precipitation.year = sum(precipitation))
 
-  # Calculate average annual rainfall over the reference years
-  x <- dat.stn %>%
-    dplyr::filter(year %in% av.rainfall.years) %>%
-    dplyr::group_by(year) %>%
-    dplyr::summarize(ndays = dplyr::n_distinct(month, day),
-                     precipitation.year = sum(precipitation))
+    if (all(av.rainfall.years %in% x$year) & all(x$ndays >= min.days.per.year)) {
+      av.rainfall <- mean(x$precipitation.year)
 
-  if (all(av.rainfall.years %in% x$year) & all(x$ndays >= min.days.per.year)) {
-    AvRainfall <- mean(x$precipitation.year)
+    } else {
+      warning("Unable to calculate average annual rainfall for station ",
+              dat.stn$station[1],
+              immediate. = TRUE)
 
-  } else {
-    warning("Unable to calculate average annual rainfall for station ",
-            dat.stn$station[1],
-            immediate. = TRUE)
-
-    return(NULL)
+      return(NULL)
+    }
   }
 
 
@@ -139,14 +180,12 @@ bom_db_ffdi <- function(dat,
 
     dplyr::ungroup() %>%
 
-    dplyr::bind_cols(bom_db_drought(.$precip.daily, .$tmax.daily, AvRainfall))
+    dplyr::bind_cols(bom_db_drought(.$precip.daily, .$tmax.daily, av.rainfall))
 
 
   dat.stn <- dat.stn %>%
     # Join daily value of KBDI to original time-step data
     dplyr::left_join(dat.daily, by = c("year", "month", "day")) %>%
-
-    dplyr::mutate(drought = ifelse(drought <= 0, MinDroughtFactor, drought)) %>%
 
     # Add calculated FFDI values and return the data frame.
     # Missing values in any of the input variables will propagate

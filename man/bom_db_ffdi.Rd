@@ -4,17 +4,31 @@
 \alias{bom_db_ffdi}
 \title{Calculate FFDI for specified weather stations}
 \usage{
-bom_db_ffdi(dat, av.rainfall.years = 2001:2015, min.days.per.year = 300)
+bom_db_ffdi(
+  dat,
+  av.rainfall.years = 2001:2015,
+  min.days.per.year = 300,
+  av.rainfall.value = NULL
+)
 }
 \arguments{
 \item{av.rainfall.years}{A vector of four digit year numbers for the
 reference period over which average annual rainfall at each weather station
 should be calculated. This is used in the KBDI calculation. Normally the
 reference period will be a sequence of contiguous years, but it does not
-have to be. Default is \code{2001:2015}.}
+have to be. Default is \code{2001:2015}. Ignored if a value for
+\code{av.rainfall.value} is provided.}
 
 \item{min.days.per.year}{The minimum number of days of rainfall data required
-for each year specified by \code{av.rainfall.years}. Default is \code{300}.}
+for each year specified by \code{av.rainfall.years}. Default is \code{300}.
+Ignored if a value for \code{av.rainfall.value} is provided.}
+
+\item{av.rainfall.value}{A vector of average annual rainfall values to use
+instead of calculating averages from weather station data. The vector
+should either consist of a single value to use for all weather stations in
+the input data, or it should provide a value for each station. The default
+(\code{NULL}) means to calculate average annual values from the station
+data.}
 
 \item{dat.stn}{A data frame with records for one or more weather stations.
 Normally this will made up of records returned from querying the synoptic
@@ -52,6 +66,15 @@ dat <- bom_db_synoptic(DB) \%>\%
 
 # Calculate FFDI for stations
 ffdi <- bom_db_ffdi(dat)
+
+# Calculate FFDI for stations using non-default range of years
+# for average annual rainfall
+ffdi <- bom_db_ffdi(dat, av.rainfall.years = 1981:2010)
+
+# Calculate FFDI for stations using a single value for
+# average annual rainfall for all weather stations in the
+# input data
+ffdi <- bom_db_ffdi(dat, av.rainfall.value = 900)
 
 # If you want to relate FFDI and drought factor values to the
 # original sub-daily weather values, join to input data
