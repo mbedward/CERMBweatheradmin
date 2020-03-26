@@ -36,7 +36,9 @@
   type <- .get_data_type(dat)
 
   lookup <- dplyr::filter(COLUMN_LOOKUP, datatype == type)
-  ii <- match(colnames(dat), lookup[["input"]])
+  cnames <- tolower(colnames(dat))
+  lookupnames <- tolower(lookup[["input"]])
+  ii <- match(cnames, lookupnames)
   if (anyNA(ii)) stop("Unrecognized column name(s): ", colnames(dat)[is.na(ii)])
 
   dbnames <- lookup[["db"]][ii]
@@ -50,7 +52,8 @@
 
 
 .get_data_type <- function(dat.raw) {
-  if (any(stringr::str_detect(colnames(dat.raw), "precipitation.*since.*9"))) "aws"
+  cnames <- tolower(colnames(dat.raw))
+  if (any(stringr::str_detect(cnames, "precipitation.*since.*9"))) "aws"
   else "synoptic"
 }
 
