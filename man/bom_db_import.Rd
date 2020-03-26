@@ -24,8 +24,10 @@ the function will silently ignore any that are missing in the directory or
 zip file. If FALSE, missing stations result in an error.}
 }
 \value{
-A named vector giving the number of rows added to the AWS and Synoptic
-  tables.
+\code{TRUE} if the process was completed, or \code{FALSE} otherwise.
+  Note that completion of the process means only that the input data were
+  successfully read, not necessarily that new records were added to the
+  database.
 }
 \description{
 This function can read delimited text data, in the format used by the Bureau

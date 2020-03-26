@@ -19,6 +19,10 @@ bom_zip_summary <- function(zipfile, include = c("data", "all", "empty")) {
 
   files <- unzip(zipfile, list = TRUE)
 
+  if (length(files) == 0) {
+    return( data.frame(station = integer(0), filename = character(0), filesize = integer(0)) )
+  }
+
   # Identify station data files
   pattern <- "_Data_[_\\d]+\\.txt$"
   ii <- stringr::str_detect(files[["Name"]], pattern)

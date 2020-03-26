@@ -26,8 +26,10 @@
 #'   the function will silently ignore any that are missing in the directory or
 #'   zip file. If FALSE, missing stations result in an error.
 #'
-#' @return A named vector giving the number of rows added to the AWS and Synoptic
-#'   tables.
+#' @return \code{TRUE} if the process was completed, or \code{FALSE} otherwise.
+#'   Note that completion of the process means only that the input data were
+#'   successfully read, not necessarily that new records were added to the
+#'   database.
 #'
 #' @export
 #'
@@ -73,15 +75,6 @@ bom_db_import <- function(db,
 
   else
     .do_import_file_via_pool(db, datapath)
-
-
-  # Return a vector of number of records added to each table
-  Nrecs <- bom_db_summary(db, by = "total")
-
-  x <- Nrecs[["nrecs"]] - Nrecs.init[["nrecs"]]
-  names(x) <- Nrecs[["table"]]
-
-  x
 }
 
 
@@ -104,7 +97,13 @@ bom_db_import <- function(db,
                            stations = NULL,
                            allow.missing = TRUE) {
 
-  if (is.null(stations)) stations <- bom_zip_summary(zipfile)[["station"]]
+  # Check for empty zip file
+  info <- bom_zip_summary(zipfile)
+  if (nrow(info) == 0) return(FALSE)
+
+  if (is.null(stations)) {
+    stations <- info[["station"]]
+  }
 
   dats <- bom_zip_data(zipfile, stations, allow.missing)
 
@@ -169,12 +168,18 @@ bom_db_import <- function(db,
 # Uses a database connection object directly.
 #
 .do_import_file_via_connection <- function(conn, filepath) {
-  dat <- read.csv(filepath, stringsAsFactors = FALSE)
-  dat <- .map_fields(dat)
+  dat <- try(read.csv(filepath, stringsAsFactors = FALSE), silent=TRUE)
 
-  rs <- DBI::dbSendStatement(conn, .sql_import(dat))
-  DBI::dbBind(rs, params = dat)
-  DBI::dbClearResult(rs)
+  if (inherits(dat, "try-error")) FALSE
+  else {
+    dat <- .map_fields(dat)
+
+    rs <- DBI::dbSendStatement(conn, .sql_import(dat))
+    DBI::dbBind(rs, params = dat)
+    DBI::dbClearResult(rs)
+
+    TRUE
+  }
 }
 
 
