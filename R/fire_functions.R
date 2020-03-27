@@ -340,10 +340,11 @@ bom_db_drought <- function(daily.precip,
       if (Kday[i] >= 20) {
         xlim <- 75 / (270.525 - 1.267 * Kday[i])
       } else {
-        xlim <- x
+        xlim <- 1 / (1 + 0.1135 * Kday[i])
       }
 
       x <- min(xraw, xlim)
+
       xfactor <- (41 * x^2 + x) / (40 * x^2 + x + 1)
 
       DFbase <- 10.5* (1.0 - exp(-(Kday[i] + 30) / 40))
