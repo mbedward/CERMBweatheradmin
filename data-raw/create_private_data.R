@@ -11,7 +11,7 @@
     "`minute` INTEGER,",
     "`precipitation` REAL,",
     "`temperature` REAL,",
-    "`relhumidity` INTEGER,",
+    "`relhumidity` REAL,",
     "`windspeed` REAL,",
     "`winddir` REAL,",
     "PRIMARY KEY(station, year, month, day, hour) );",
@@ -27,10 +27,10 @@
     "`minute` INTEGER,",
     "`precipitation` REAL,",
     "`temperature` REAL,",
-    "`relhumidity` INTEGER,",
-    "`windspeed` INTEGER,",
-    "`winddir` INTEGER,",
-    "`windgust` INTEGER,",
+    "`relhumidity` REAL,",
+    "`windspeed` REAL,",
+    "`winddir` REAL,",
+    "`windgust` REAL,",
     "PRIMARY KEY(station, year, month, day, hour, minute) );",
     sep = "\n")
 )

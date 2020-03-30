@@ -174,6 +174,24 @@ bom_db_import <- function(db,
   else {
     dat <- .map_fields(dat)
 
+    # Ensure we have integer or numeric data in each column
+    # (some BOM data sets have empty values as character strings)
+    coltypes <- attributes(dat)$coltypes
+    stopifnot(length(coltypes) == ncol(dat))
+
+    suppressWarnings(
+      for (i in 1:ncol(dat)) {
+        if (coltypes[i] == "integer") {
+          dat[[i]] <- as.integer(dat[[i]])
+        } else if (coltypes[i] == "numeric") {
+          dat[[i]] <- as.numeric(dat[[i]])
+        } else {
+          # This would be a package programming error
+          stop("Unknown column type in COLUMN_LOOKUP: ", coltypes[i])
+        }
+      }
+    )
+
     rs <- DBI::dbSendStatement(conn, .sql_import(dat))
     DBI::dbBind(rs, params = dat)
     DBI::dbClearResult(rs)

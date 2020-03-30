@@ -31,7 +31,9 @@
 }
 
 
-# Selects and renames columns in a data frame of raw data
+# Selects and renames columns in a data frame of raw data.
+# Adds data type (aws or synoptic) and column types as attributes
+# of the returned data frame.
 .map_fields <- function(dat) {
   type <- .get_data_type(dat)
 
@@ -47,14 +49,21 @@
   dat <- dat[, !is.na(dbnames)]
   attr(dat, "datatype") <- type
 
+  attr(dat, "coltypes") <- lookup[["coltype"]][ii]
+
   dat
 }
 
 
+# Determines whether a data set is for AWS or Synoptic data by checking
+# for either of two columns only in AWS data (windgust and AWS flag)
 .get_data_type <- function(dat.raw) {
   cnames <- tolower(colnames(dat.raw))
-  if (any(stringr::str_detect(cnames, "precipitation.*since.*9"))) "aws"
-  else "synoptic"
+  if (any(stringr::str_detect(cnames, "maximum.windgust|aws.flag"))) {
+    "aws"
+  } else {
+    "synoptic"
+  }
 }
 
 
