@@ -43,12 +43,19 @@ A data frame with columns:
   \code{'station', 'year', 'month', 'day', 'hour', 'minute',}
   \code{'tmax.daily'} (maximum temperature for calendar day),
   \code{'precip.daily'} (total rainfall from 09:01 to 09:00 the next day),
+  \code{'kbdi'} (Keetch-Bryam drought index),
   \code{'drought'} (daily drought factor values),
   \code{'ffdi'} (FFDI value based on daily drought factor and time-step
   values for temperature, wind speed and relative humidity.
 }
 \description{
-Calculate FFDI for specified weather stations
+This is the main function used to calculate FFDI (Forest Fire Danger Index)
+and the related variables KBDI Keetch-Bryam Drought Index and Drought Factor.
+You can call it directly to calculate FFDI for an arbitrary data set of
+weather data for one or more stations (see Arguments below for the required
+format). The function is also used by \code{bom_db_import} to calculate FFDI
+when importing new weather records, and \code{bom_db_update} to perform
+calculations for previously imported records.
 }
 \examples{
 \dontrun{
