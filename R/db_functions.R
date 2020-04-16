@@ -553,6 +553,124 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
 }
 
 
+#' Check that records for a given station form an uninterrupted time series
+#'
+#' Checks whether the records for each station form a non-interrupted time series.
+#'
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#'
+#' @param station Integer station identifier.
+#'
+#' @param dbtable Either 'AWS' or 'Synoptic'. Case-insensitive and may be
+#'   abbreviated. Default is 'AWS'.
+#'
+#' @return A named list with elements:
+#'   \describe{
+#'     \item{ok}{TRUE if records form an uninterrupted time series; FALSE otherwise.}
+#'     \item{err}{If 'ok' is FALSE, message indicating first break in time series.}
+#'   }
+#'
+#' @export
+#'
+bom_db_check_datetimes <- function(db,
+                                   station,
+                                   dbtable = c("aws", "synoptic")) {
+
+  .ensure_connection(db)
+
+  # Case-insensitive match for table names
+  dbtable <- match.arg(toupper(dbtable), c("AWS", "SYNOPTIC"), several.ok = FALSE)
+  if (dbtable == "SYNOPTIC") dbtable <- "Synoptic"
+
+  cmd <- glue::glue("select year, month, day, hour, minute from {dbtable}
+                    where station = {station}
+                    order by year, month, day, hour, minute;")
+
+  dat <- pool::dbGetQuery(db, cmd)
+
+  if (nrow(dat) == 0) {
+    msg <- glue::glue("No records in table {dbtable} for station {station}")
+    warning(msg, immediate. = TRUE)
+
+    list(ok = TRUE, err = "")
+
+  } else {
+    check <- .do_check_datetimes(dat, daily = FALSE)
+    list(ok = check$ok, err = check$err)
+  }
+}
+
+
+# Check that data records form an uninterrupted series of days.
+#
+# dat - A data frame with columns year, month, day (and possibly others).
+#
+# daily - If TRUE, check that here is only one record per day.
+#   A value must be supplied.
+#
+# Returns a list with elements:
+#   ok - TRUE if data are valid and time series is uninterrupted.
+#   rec.order - Integer vector giving date-time order of records
+#     or NULL if ok is FALSE.
+#
+.do_check_datetimes <- function(dat, daily) {
+  if (missing(daily)) stop("Argument 'daily' (logical) must be provided")
+
+  colnames(dat) <- tolower(colnames(dat))
+  if (!all(c("year", "month", "day") %in% colnames(dat))) {
+    stop("Columns year, month, day are required")
+  }
+
+  # If less than two records, order doesn't matter
+  if (nrow(dat) < 2) return(list(ok = TRUE, rec.order = seq_len(nrow(dat))))
+
+  ok <- TRUE
+
+  dat <- dat %>%
+    # ungroup just in case
+    dplyr::ungroup() %>%
+
+    dplyr::mutate(.recindex = dplyr::row_number(),
+                  date = sprintf("%4d-%02d-%02d", year, month, day),
+                  date = lubridate::ymd(date))
+
+  # If only daily records are expected, check this
+  if (daily) {
+    if (!(dplyr::n_distinct(dat$date) == nrow(dat))) {
+      ok <- FALSE
+      err <- "Expected only one record per day"
+    }
+  }
+
+  if (ok) {
+    # Order records
+    ovars <- c("year", "month", "day")
+    if ("hour" %in% colnames(dat)) ovars <- c(ovars, "hour")
+    if ("minute" %in% colnames(dat)) ovars <- c(ovars, "minute")
+    dat <- dplyr::arrange_at(dat, ovars)
+
+    # Check that there are no missing days
+    dat <- dat %>%
+      dplyr::mutate(diff = as.integer(date - dplyr::lag(date)))
+
+    # First record is ignored because there is no prior date
+    okdiffs <- c(TRUE, dat$diff[-1] %in% 0:1)
+    if (any(!okdiffs)) {
+      ok <- FALSE
+      i <- which(!okdiffs)[1]
+      err <- glue::glue("Time series gap before {dat$date[i]}")
+    }
+  }
+
+  if (ok) {
+    list(ok = TRUE, err = NULL, rec.order = dat$.recindex)
+  } else {
+    list(ok = FALSE, err = err, rec.order = NULL)
+  }
+}
+
+
 #' Format station identifying numbers as character strings
 #'
 #' Formats station numbers to match the embedded strings in station

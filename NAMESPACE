@@ -2,6 +2,8 @@
 
 export("%>%")
 export(bom_db_aws)
+export(bom_db_calculate_ffdi)
+export(bom_db_check_datetimes)
 export(bom_db_close)
 export(bom_db_create)
 export(bom_db_drought)
