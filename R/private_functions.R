@@ -97,3 +97,41 @@
   x <- stringr::str_extract(filenames, "_Data_\\d+")
   stringr::str_extract(x, "\\d+")
 }
+
+
+# Convert integer year, month, day values to Date objects
+.ymd_to_date <- function(year, month, day) {
+  if(length(month) != length(year) || length(day) != length(year)) {
+    stop("year, month and day vectors must be the same length")
+  }
+
+  as.Date( sprintf("%4d-%02d-%02d", year, month, day) )
+}
+
+
+# Convert a vector of Date objects to a data frame of
+# integer year, month, day values
+.date_to_ymd <- function(dates) {
+  stopifnot(inherits(dates, "Date"))
+
+  data.frame(
+    year = as.integer(lubridate::year(dates)),
+    month = as.integer(lubridate::month(dates)),
+    day = lubridate::day(dates)
+  )
+}
+
+
+# Given a vector, check for a block of one or more missing values at the tail
+# and, if found, return the index for the first missing value in that block.
+# Return NA if no such block is present.
+.find_na_tail <- function(x) {
+  N <- length(x)
+  if (!is.na(x[N])) {
+    NA
+  } else {
+    i <- match(FALSE, rev(is.na(x)), nomatch = N+1)
+    N - i + 2
+  }
+}
+

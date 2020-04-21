@@ -3,24 +3,24 @@
 #' This function can read delimited text data, in the format used by the Bureau
 #' of Meteorology, from an individual weather station file or a directory or zip
 #' file containing one or more such files, stations in CSV format, and import
-#' them into a SQLite database.
-#'
-#' In the case of the input data source being a directory or zip file, weather
-#' station files are identified by searching for names that include 'Data'
-#' followed by digits and underscores, with the file extension '.txt'. Any
-#' input records already present in the database are silently ignored.
+#' them into a SQLite database. In the case of the input data source being a
+#' directory or zip file, weather station files are identified by searching for
+#' names that include 'Data' followed by digits and underscores, with the file
+#' extension '.txt'. Any input records already present in the database are
+#' silently ignored. Note that fire-related variables (KBDI, drought factor and
+#' FFDI) are \strong{not} calculated for the new records. call the function
+#' \code{bom_db_update_fire} to do this.
 #'
 #' @param db A database connection pool object as returned by
 #'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
 #' @param datapath Character path to one of the following: an individual weather
 #'   station data file in CSV format; a directory containing one or more data
-#'   files; or a zip file containing one or more such files. Zip files are
-#'   assumed to have a '.zip' extension.
+#'   files; or a zip file containing one or more such files. If a zip file
+#'   (identified by a '.zip' extension) the path should be to a single file.
 #'
 #' @param stations Either NULL (default) to import data for all stations, or a
 #'   character vector of station identifiers. Ignored if \code{datapath} is a
-#'   single file.
 #'
 #' @param allow.missing If TRUE (default) and specific stations were requested,
 #'   the function will silently ignore any that are missing in the directory or
@@ -31,7 +31,7 @@
 #'   successfully read, not necessarily that new records were added to the
 #'   database.
 #'
-#' @export
+#' @seealso \code{\link{bom_db_update_fire}}
 #'
 #' @examples
 #' \dontrun{
@@ -51,6 +51,8 @@
 #' # Do other things, then at end of session...
 #' bom_db_close(DB)
 #' }
+#'
+#' @export
 #'
 bom_db_import <- function(db,
                           datapath,
@@ -553,68 +555,39 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
 }
 
 
-#' Check that records for a given station form an uninterrupted time series
+#' Check that records in a data set form an uninterrupted time series
 #'
-#' Checks whether the records for each station form a non-interrupted time series.
+#' Given a data frame of daily or sub-daily records for one or more weather
+#' stations, this function checks whether there are any gaps in the time series.
+#' A gap is defined as one or more missing days. The input data records can be
+#' in any order. It is primarily a helper function, called by other functions in
+#' the package that require an uninterrupted time series, but can also be used
+#' directly.
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param dat A data frame with date columns (integer year, month and day),
+#'   optional time columns (integer hour and minute) and possibly other
+#'   variables. Normally a column of integer station identifiers will be present
+#'   but this is optional. If missing, it will be assumed that all records pertain to
+#'   a single weather station.
 #'
-#' @param station Integer station identifier.
+#' @param daily If \code{TRUE}, expect only one record per day and return a
+#'   failed check result if this is not the case. Note that a value must be
+#'   supplied for this argument.
 #'
-#' @param dbtable Either 'AWS' or 'Synoptic'. Case-insensitive and may be
-#'   abbreviated. Default is 'AWS'.
-#'
-#' @return A named list with elements:
+#' @return A nested list with one element per station, where each element is a
+#'   list consisting of:
 #'   \describe{
-#'     \item{ok}{TRUE if records form an uninterrupted time series; FALSE otherwise.}
-#'     \item{err}{If 'ok' is FALSE, message indicating first break in time series.}
+#'     \item{station}{Integer station identifier (Set to -1 if no station
+#'       column is provided).}
+#'     \item{ok}{Logical value indicating success or failure of checks.}
+#'     \item{gaps}{Dates (as Date objects) before which each gap in the time
+#'       series occurs.}
+#'     \item{rec.order}{Indices of data records ordered by date and time.}
 #'   }
 #'
 #' @export
 #'
-bom_db_check_datetimes <- function(db,
-                                   station,
-                                   dbtable = c("aws", "synoptic")) {
-
-  .ensure_connection(db)
-
-  # Case-insensitive match for table names
-  dbtable <- match.arg(toupper(dbtable), c("AWS", "SYNOPTIC"), several.ok = FALSE)
-  if (dbtable == "SYNOPTIC") dbtable <- "Synoptic"
-
-  cmd <- glue::glue("select year, month, day, hour, minute from {dbtable}
-                    where station = {station}
-                    order by year, month, day, hour, minute;")
-
-  dat <- pool::dbGetQuery(db, cmd)
-
-  if (nrow(dat) == 0) {
-    msg <- glue::glue("No records in table {dbtable} for station {station}")
-    warning(msg, immediate. = TRUE)
-
-    list(ok = TRUE, err = "")
-
-  } else {
-    check <- .do_check_datetimes(dat, daily = FALSE)
-    list(ok = check$ok, err = check$err)
-  }
-}
-
-
-# Check that data records form an uninterrupted series of days.
-#
-# dat - A data frame with columns year, month, day (and possibly others).
-#
-# daily - If TRUE, check that here is only one record per day.
-#   A value must be supplied.
-#
-# Returns a list with elements:
-#   ok - TRUE if data are valid and time series is uninterrupted.
-#   rec.order - Integer vector giving date-time order of records
-#     or NULL if ok is FALSE.
-#
-.do_check_datetimes <- function(dat, daily) {
+bom_db_check_datetimes <- function(dat, daily) {
   if (missing(daily)) stop("Argument 'daily' (logical) must be provided")
 
   colnames(dat) <- tolower(colnames(dat))
@@ -622,52 +595,70 @@ bom_db_check_datetimes <- function(db,
     stop("Columns year, month, day are required")
   }
 
-  # If less than two records, order doesn't matter
-  if (nrow(dat) < 2) return(list(ok = TRUE, rec.order = seq_len(nrow(dat))))
+  HasStation <- ("station" %in% colnames(dat))
 
-  ok <- TRUE
-
-  dat <- dat %>%
-    # ungroup just in case
-    dplyr::ungroup() %>%
-
-    dplyr::mutate(.recindex = dplyr::row_number(),
-                  date = sprintf("%4d-%02d-%02d", year, month, day),
-                  date = lubridate::ymd(date))
-
-  # If only daily records are expected, check this
-  if (daily) {
-    if (!(dplyr::n_distinct(dat$date) == nrow(dat))) {
-      ok <- FALSE
-      err <- "Expected only one record per day"
-    }
+  if (HasStation) {
+    if (anyNA(dat$station)) stop("station column should not contain missing values")
+  } else {
+    dat$station <- -1
   }
 
-  if (ok) {
-    # Order records
-    ovars <- c("year", "month", "day")
-    if ("hour" %in% colnames(dat)) ovars <- c(ovars, "hour")
-    if ("minute" %in% colnames(dat)) ovars <- c(ovars, "minute")
-    dat <- dplyr::arrange_at(dat, ovars)
+  # ungroup just in case
+  dat <- dplyr::ungroup(dat)
+
+  # Vars to use for ordering records
+  ovars <- c("year", "month", "day")
+  if ("hour" %in% colnames(dat)) ovars <- c(ovars, "hour")
+  if ("minute" %in% colnames(dat)) ovars <- c(ovars, "minute")
+
+  # Run check for each station
+  checks <- lapply(unique(dat$station), function(stn) {
+    dat.stn <- dat %>% dplyr::filter(station == stn)
+
+    # Default check value
+    res <- list(station = stn,
+                ok = TRUE,
+                err = NULL,
+                gaps = NULL,
+                rec.order = NULL)
+
+    # If less than two records, gaps and order do not apply
+    if (nrow(dat.stn) < 2) {
+      res$rec.order <- seq_len(nrow(dat.stn))
+      return(res)
+    }
+
+    dat.stn <- dat.stn %>%
+      dplyr::mutate(.recindex = dplyr::row_number(),
+                    date = .ymd_to_date(year, month, day))
+
+    # If only daily records are expected, check and return
+    # early if that is not the case
+    if (daily && dplyr::n_distinct(dat.stn$date) < nrow(dat.stn)) {
+      res$ok <- FALSE
+      res$err <- "Expected only one record per day"
+      return(res)
+    }
+
+    dat.stn <- dplyr::arrange_at(dat.stn, ovars)
+    res$rec.order <- dat.stn$.recindex
 
     # Check that there are no missing days
-    dat <- dat %>%
+    dat.stn <- dat.stn %>%
       dplyr::mutate(diff = as.integer(date - dplyr::lag(date)))
 
     # First record is ignored because there is no prior date
-    okdiffs <- c(TRUE, dat$diff[-1] %in% 0:1)
+    okdiffs <- c(TRUE, dat.stn$diff[-1] %in% 0:1)
     if (any(!okdiffs)) {
-      ok <- FALSE
-      i <- which(!okdiffs)[1]
-      err <- glue::glue("Time series gap before {dat$date[i]}")
+      res$ok <- FALSE
+      res$err <- "Gap(s) in time series"
+      res$gaps <- dat.stn$date[!okdiffs]
     }
-  }
 
-  if (ok) {
-    list(ok = TRUE, err = NULL, rec.order = dat$.recindex)
-  } else {
-    list(ok = FALSE, err = err, rec.order = NULL)
-  }
+    res
+  })
+
+  checks
 }
 
 

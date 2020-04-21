@@ -4,10 +4,10 @@
 \alias{bom_db_effective_rainfall}
 \title{Calculate effective rainfall values from daily values}
 \usage{
-bom_db_effective_rainfall(precip.daily)
+bom_db_effective_rainfall(precipdaily)
 }
 \arguments{
-\item{precip.daily}{Vector of daily precipitation values.}
+\item{precipdaily}{Vector of daily precipitation values.}
 }
 \value{
 A vector of effective rainfall values.

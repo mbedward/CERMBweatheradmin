@@ -1,12 +1,181 @@
-#' Calculate FFDI for specified weather stations
+#' Calculate values of fire-related variables in the database tables
 #'
-#' This is the main function used to calculate FFDI (Forest Fire Danger Index)
-#' and the related variables KBDI Keetch-Bryam Drought Index and Drought Factor.
+#' This function calculates and stores values for the database fields 'kbdi'
+#' (Keetch-Bryam Drought Index), 'drought' (Drought Factor), and 'ffdi' (Forest
+#' Fire Danger Index) for records in one or both of the 'AWS' and 'Synoptic'
+#' database tables. Calculations are performed by the function
+#' \code{bom_db_calculate_ffdi}. Depending on the value of the \code{records}
+#' argument, values can be calculated for all records (any previous values are
+#' replaced), or only for those records with more recent dates and times than
+#' the last record with non-missing values. The records must cover a continuous
+#' time series, i.e. no gaps in the sequence of dates.
+#'
+#' @param db A database connection pool object as returned by
+#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#'
+#' @param tables Names of tables to update. Default is to update both the
+#'   'AWS' and 'Synoptic' tables. Table names may be abbreviated.
+#'
+#' @param records The records to update: either \code{'new'} (default) to only
+#'   update records with more recent dates and times than the last record with
+#'   calculated values; or \code{'all'} to calculate values for all records in a
+#'   table, replacing any previously calculated values. Note that for both
+#'   options, values can only be calculated for records that form a continuous
+#'   time series.
+#'
+#' @param stations An optional vector of integer station numbers. If provided,
+#'   updates will only be performed for these stations. The default is to
+#'   update all stations.
+#'
+#' @return A vector with named elements giving the number of records updated by
+#'   table.
+#'
+#' @seealso \code{\link{bom_db_calculate_ffdi}}
+#'
+#' @export
+#'
+bom_db_update_fire <- function(db,
+                               tables = c("AWS", "Synoptic"),
+                               records = c("new", "all"),
+                               stations = NULL) {
+  .ensure_connection(db)
+
+  records <- match.arg(records)
+
+  # Case-insensitive match for table names
+  tables <- unique(match.arg(tolower(tables),
+                             c("aws", "synoptic"),
+                             several.ok = TRUE))
+
+  res <- lapply(tables, function(the.table) {
+    table.stations <- stations
+    if (length(table.stations) == 0) {
+      cmd <- glue::glue("select distinct station
+                        from {the.table} order by station;")
+
+      table.stations <- pool::dbGetQuery(db, cmd) %>%
+        dplyr::pull(station)
+    }
+
+    nrecs.updated <- sapply(table.stations, function(the.station) {
+      .do_update_fire(the.table, the.station, records)
+    })
+
+    data.frame(table = the.table,
+               station = table.stations,
+               nrecs = nrecs.updated,
+               stringsAsFactors = FALSE)
+  })
+
+  res <- do.call(rbind, res)
+
+  res
+}
+
+
+.do_update_fire <- function(the.table, the.station, records) {
+  stopifnot(length(the.table) == 1,
+            the.table %in% c("aws", "synoptic"))
+
+  stopifnot(length(the.station) == 1)
+
+  stopifnot(length(records) == 1,
+            records %in% c("new", "all"))
+
+  nrecs.updated <- 0
+
+  cmd <- glue::glue("select * from {the.table}
+                    where station = {the.station}
+                    order by year, month, day, hour, minute;")
+
+  dat <- pool::dbGetQuery(db, cmd)
+
+  if (nrow(dat) > 0) {
+    if (records == "new") {
+      # Subset to records at the end of the time series that do
+      # not have FFDI values plus 20 days of preceding records
+      # (for drought factor calculation)
+      irec <- .find_na_tail(dat$ffdi)
+
+      if (is.na(irec)) {
+        # Last record has FFDI value - nothing to do
+        nmissing <- 0
+      } else {
+        # Date of earliest record in subset
+        date.missing <- .ymd_to_date(dat$year[irec], dat$month[irec], dat$day[irec])
+
+        # Need 20 days of previous data for drought factor calculation
+        # (or all previous records if less than 20 days exist)
+        ymd.start <- .date_to_ymd( date.missing - 20 )
+
+        dat <- dat %>%
+          dplyr::filter(year >= ymd.start$year,
+                        month >= ymd.start$month,
+                        day >= ymd.start$day)
+
+        # Check whether the data records form an uninterrupted daily
+        # time series
+        check <- bom_db_check_datetimes(dat, daily = FALSE)
+        if (!check$ok) {
+          # if there are gaps we can only work with the most recent
+          # uninterrupted subset
+          gap.date <- tail(check$gaps, 1)
+          ymd.start <- .date_to_ymd(gap.date)
+
+          dat <- dat %>%
+            dplyr::filter(year >= ymd.start$year,
+                          month >= ymd.start$month,
+                          day >= ymd.start$day)
+        }
+      }
+    }
+
+    dat.ffdi <- bom_db_calculate_ffdi(dat)
+
+    # update table
+    # TODO - there must be a less verbose way of doing this with SQL
+    nrecs.updated <- pool::poolWithTransaction(db, function(con) {
+      DBI::dbWriteTable(con, "ffdi_tmp", dat.ffdi, overwrite = TRUE)
+
+      cmd <- glue::glue("update {the.table} as a
+                        set (tmaxdaily, precipdaily, kbdi, drought, ffdi) = (
+                          select tmaxdaily, precipdaily, kbdi, drought, ffdi
+                          from ffdi_tmp as b
+                          where a.station = b.station and
+                          a.year = b.year and
+                          a.month = b.month and
+                          a.day = b.day and
+                          a.hour = b.hour and
+                          a.minute = b.minute)
+                        where exists (select 1
+                          from ffdi_tmp as b
+                          where a.station = b.station and
+                          a.year = b.year and
+                          a.month = b.month and
+                          a.day = b.day and
+                          a.hour = b.hour and
+                          a.minute = b.minute);")
+
+      nrecs <- DBI::dbExecute(con, cmd)
+
+      DBI::dbExecute(con, "drop table mydata_tmp;")
+
+      nrecs
+    })
+  }
+
+  nrecs.updated
+}
+
+
+#' Calculate FFDI for a given data set.
+#'
+#' This function calculates FFDI (Forest Fire Danger Index)
+#' and the related variables: KBDI (Keetch-Bryam Drought Index) and Drought Factor.
 #' You can call it directly to calculate FFDI for an arbitrary data set of
 #' weather data for one or more stations (see Arguments below for the required
-#' format). The function is also used by \code{bom_db_import} to calculate FFDI
-#' when importing new weather records, and \code{bom_db_update} to perform
-#' calculations for previously imported records.
+#' format). The function is also used by \code{bom_db_update_fire} which sets the
+#' values of fire-related variables in the database tables.
 #'
 #' @param dat.stn A data frame with records for one or more weather stations.
 #'   Normally this will made up of records returned from querying the synoptic
@@ -36,8 +205,8 @@
 #'
 #' @return A data frame with columns:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',}
-#'   \code{'tmax.daily'} (maximum temperature for calendar day),
-#'   \code{'precip.daily'} (total rainfall from 09:01 to 09:00 the next day),
+#'   \code{'tmaxdaily'} (maximum temperature for calendar day),
+#'   \code{'precipdaily'} (total rainfall from 09:01 to 09:00 the next day),
 #'   \code{'kbdi'} (Keetch-Bryam drought index),
 #'   \code{'drought'} (daily drought factor values),
 #'   \code{'ffdi'} (FFDI value based on daily drought factor and time-step
@@ -77,12 +246,14 @@
 #' bom_db_close(DB)
 #' }
 #'
+#' @seealso \code{\link{bom_db_update_fire}}
+#'
 #' @export
 #'
-bom_db_ffdi <- function(dat,
-                        av.rainfall.years = 2001:2015,
-                        min.days.per.year = 300,
-                        av.rainfall.value = NULL) {
+bom_db_calculate_ffdi <- function(dat,
+                                  av.rainfall.years = 2001:2015,
+                                  min.days.per.year = 300,
+                                  av.rainfall.value = NULL) {
 
   colnames(dat) <- tolower(colnames(dat))
 
@@ -113,7 +284,12 @@ bom_db_ffdi <- function(dat,
     the.stn <- stations[istn]
     the.av.rainfall <- av.rainfall.value[istn]
 
-    .do_calculate_ffdi(dat %>% dplyr::filter(station == the.stn),
+    dat.stn <- dat %>%
+      dplyr::filter(station == the.stn)
+
+    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)
+
+    .do_calculate_ffdi(dat.stn,
                        av.rainfall.years,
                        min.days.per.year,
                        the.av.rainfall)
@@ -169,7 +345,7 @@ bom_db_ffdi <- function(dat,
   dat.daily <- dat.stn %>%
     # Tmax by calendar day
     dplyr::group_by(year, month, day) %>%
-    dplyr::mutate(tmax.daily = max(temperature, na.rm = TRUE)) %>%
+    dplyr::mutate(tmaxdaily = max(temperature, na.rm = TRUE)) %>%
     dplyr::ungroup() %>%
 
     # Rainfall for 0901 to 0900 the following day. Following
@@ -180,16 +356,16 @@ bom_db_ffdi <- function(dat,
                   rainday = ifelse(timestr < "0901", rainday - 1, rainday)) %>%
 
     dplyr::group_by(rainday) %>%
-    dplyr::mutate(precip.daily = sum(precipitation)) %>%
+    dplyr::mutate(precipdaily = sum(precipitation)) %>%
 
     dplyr::group_by(year, month, day) %>%
 
-    dplyr::summarize(tmax.daily = dplyr::first(tmax.daily),
-                     precip.daily = dplyr::first(precip.daily)) %>%
+    dplyr::summarize(tmaxdaily = dplyr::first(tmaxdaily),
+                     precipdaily = dplyr::first(precipdaily)) %>%
 
     dplyr::ungroup() %>%
 
-    dplyr::bind_cols(bom_db_drought(.$precip.daily, .$tmax.daily, av.rainfall))
+    dplyr::bind_cols(bom_db_drought(.$precipdaily, .$tmaxdaily, av.rainfall))
 
 
   dat.stn <- dat.stn %>%
@@ -208,41 +384,80 @@ bom_db_ffdi <- function(dat,
 
   dat.stn %>%
     dplyr::select(station, year, month, day, hour, minute,
-                  tmax.daily, precip.daily, kbdi, drought, ffdi)
+                  tmaxdaily, precipdaily, kbdi, drought, ffdi)
 }
 
 
-#' Calculate daily drought factor
+#' Calculate daily KBDI values
 #'
-#' Calculates daily drought factor based on the Keetch-Byram drought index
-#' Following Finkele et al. (2006), KBDI is calculated as yesterday's KBDI
-#' plus evapo-transpiration minus effective rainfall.
+#' Calculates daily values for the Keetch-Byram drought index. Following Finkele
+#' et al. (2006), KBDI is calculated as yesterday's KBDI plus
+#' evapo-transpiration minus effective rainfall. Input is a data frame of daily
+#' weather data. This must have columns: year, month, day, precipdaily,
+#' tmaxdaily. Optionally, it can also have a column: kbdi. If present,
+#' calculations will be done for the most recent block of records with missing
+#' values, with preceding records being used to initialize the KBDI time series.
+#' If a kbdi column is absent, or present but with all missing values,
+#' calculations will be performed for all records using the default
+#' initialization in which KBDI is set to its maximum value (203.2).
 #'
-#' @param daily.precip A vector of daily (assumed sequential) precipitation
-#'   values.
-#'
-#' @param daily.tmax A vector of daily maximum temperature values of the same
-#'   length (and assumed to be the same dates) as \code{daily.precip}.
+#' @param dat.daily A data frame of daily weather data. Must have columns: year,
+#'   month, day, precipdaily, tmaxdaily. Optionally, it can also have column:
+#'   kbdi. Additional columns are permitted but will be ignored. See Description
+#'   for details.
 #'
 #' @param average.rainfall Reference value for average annual rainfall.
 #'
-#' @return A data frame with columns kbdi and drought.
+#' @param assume.order If \code{TRUE} the daily data are assumed to be in
+#'   calendar order and form an uninterrupted time series. If \code{FALSE}
+#'   (default) this will be checked. This option provides for more efficient
+#'   processing as part of a pipeline, but should be left at the default when
+#'   the function is called directly.
+#'
+#' @return A data frame with columns: year, month, day, kbdi.
 #'
 #' @export
 #'
-bom_db_drought <- function(daily.precip,
-                           daily.tmax,
-                           average.rainfall) {
+bom_db_kbdi <- function(dat.daily,
+                        average.rainfall,
+                        assume.order = FALSE) {
 
-  if (length(daily.precip) != length(daily.tmax)) {
-    stop("Input vectors for precipitation and maximum temperature differ in length")
+  colnames(dat.daily) <- tolower(colnames(dat.daily))
+
+  RequiredCols <- c("year", "month", "day", "precipdaily", "tmaxdaily")
+  if (!all(RequiredCols %in% colnames(dat.daily))) {
+    stop("Input data frame must have columns: \n", RequiredCols)
   }
 
-  Ndays <- length(daily.precip)
-  Kday <- numeric(Ndays)
+  if (!assume.order) {
+    check <- bom_db_check_datetimes(dat.daily, daily = TRUE)
+    if (!check$ok) stop(check$err)
+  }
+
+  HasPriorKBDI <- "kbdi" %in% colnames(dat.daily)
+
+  if (HasPriorKBDI) {
+    # Identify most recent period with no KBDI values
+    start.rec <- .find_na_tail(dat.daily$kbdi)
+    if (is.na(start.rec)) {
+      # Last rec has KBDI value - nothing to do
+      message("Final day has KBDI value already. Nothing more to do.")
+      return(dat.daily)
+    }
+  } else {
+    start.rec <- 1
+  }
+
+  Ndays <- nrow(dat.daily)
   ET <- numeric(Ndays)
 
-  daily.precip.eff <- bom_db_effective_rainfall(daily.precip)
+  if (HasPriorKBDI) {
+    Kday <- dat.daily$kbdi
+  } else {
+    Kday <- numeric(Ndays)
+  }
+
+  precipdaily.eff <- bom_db_effective_rainfall(precipdaily)
 
   # Term 3 in ET equation, annual rainfall influence
   ET3 <- 1 + 10.88 * exp(-.001736 * average.rainfall)
@@ -250,9 +465,14 @@ bom_db_drought <- function(daily.precip,
   # Term 4 in ET equation
   ET4 <- 1e-3
 
-  # First step requires two days of records.
-  # Set to maximum dryness value
-  Kday[1:2] <- 203.2
+  # First step requires at least two days of KBDI values. If we
+  # don't have any previously calculated values, set the first
+  # two days to the maximum dryness value
+  if (start.rec == 1) {
+    Kday[1:2] <- 203.2
+  } else if (start.rec == 2) {
+    Kday[2] <- Kday[1]
+  }
 
   # Helper for KBDI loop below
   clampK <- function(x) min(203.2, max(0, round(x, digits = 1)))
@@ -283,12 +503,38 @@ bom_db_drought <- function(daily.precip,
     }
 
     ET1 <- 203.2 - Kprev
-    ET2 <- 0.968 * exp(0.0875 * daily.tmax[i-1] + 1.5552) - 8.30
+    ET2 <- 0.968 * exp(0.0875 * tmaxdaily[i-1] + 1.5552) - 8.30
     ET[i] <- ((ET1 * ET2) / ET3) * ET4
 
-    Kday[i] <- clampK( Kprev - daily.precip.eff[i] + ET[i] )
+    Kday[i] <- clampK( Kprev - precipdaily.eff[i] + ET[i] )
   }
 
+  stop("!!!FIX ME!!!")
+}
+
+
+#' Calculate daily drought factor values
+#'
+#' Blah blah blah
+#'
+#' @param dat.daily A data frame of daily weather data. Must have columns: year,
+#'   month, day, precipdaily, kbdi. Optionally, it can also have column:
+#'   drought. Additional columns are permitted but will be ignored. See
+#'   Description for details.
+#'
+#' @param assume.order If \code{TRUE} the daily data are assumed to be in
+#'   calendar order and form an uninterrupted time series. If \code{FALSE}
+#'   (default) this will be checked. This option provides for more efficient
+#'   processing as part of a pipeline, but should be left at the default when
+#'   the function is called directly.
+#'
+#' @return A data frame with columns: year, month, day, kbdi, drought.
+#'
+#' @export
+#'
+bom_db_drought <- function(dat.daily, assume.order = FALSE) {
+
+  stop("!!!FIX ME!!!")
 
   # Calculate drought factor values.
   # DF is based on the following over the last 20 days:
@@ -300,11 +546,11 @@ bom_db_drought <- function(daily.precip,
 
   # For drought factor, only rainfall of 2mm or more
   # is considered
-  prDF <- daily.precip
-  prDF[ daily.precip <= 2 ] <- 0
+  prDF <- precipdaily
+  prDF[ precipdaily <= 2 ] <- 0
 
   for (i in 21:Ndays) {
-    if (is.na(Kday[i]) || is.na(daily.precip[i])) {
+    if (is.na(Kday[i]) || is.na(precipdaily[i])) {
       DFday[i] <- NA
 
     } else {
@@ -315,7 +561,7 @@ bom_db_drought <- function(daily.precip,
       r20.flag <- prDF[ii] > 0
 
       # Look for instances of two consecutive days with rain
-      is.event <- r20.flag & lead(r20.flag)
+      is.event <- r20.flag & dplyr::lead(r20.flag)
 
       # last is.event element will be NA, change to FALSE
       is.event[length(r20.flag)] <- FALSE
@@ -371,59 +617,65 @@ bom_db_drought <- function(daily.precip,
 #' Calculate effective rainfall values from daily values
 #'
 #' For KBDI calculation (Finkele et al. 2006), the first 5mm of rain
-#' do not count towards evapo-transpiration. If it rains less than 5mm over several days,
-#' a running balance is kept. Once this balance exceeds 5mm, the first 5mm
-#' is removed for canopy interception/runoff and the remainder
-#' constitutes effective rainfall. Any day without rain resets the balance to zero.
+#' do not count towards evapo-transpiration. If it rains less than 5mm over
+#' several days, a running balance is kept. Once this balance exceeds 5mm, the
+#' first 5mm is removed for canopy interception/runoff and the remainder
+#' constitutes effective rainfall. Any day without rain resets the balance to
+#' zero.
 #'
-#' @param precip.daily Vector of daily precipitation values.
+#' @param precipdaily Vector of daily precipitation values.
+#'
+#' @param start.balance Starting balance. Should be a value between 0 and 5
+#'   (default is 0). A value outside this range will be silently set to 0 or 5.
 #'
 #' @return A vector of effective rainfall values.
 #'
 #' @export
 #'
-bom_db_effective_rainfall <- function(precip.daily) {
-  Ndays <- length(precip.daily)
-  peff <- numeric(Ndays)
-  bal <- 0
+bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
+  start.balance <- min(5, max(0, start.balance[1]))
 
-  for (i in 2:Ndays) {
+  Ndays <- length(precipdaily)
+  peff <- numeric(Ndays)
+  bal <- start.balance
+
+  for (i in 1:Ndays) {
     bal.prev <- bal
 
-    if (precip.daily[i] == 0) {
+    if (precipdaily[i] == 0) {
       # reset for a day with no rain
       bal <- 0
     } else {
       if (bal.prev == 0) {
         # some rain this day and
         # none previously
-        if (precip.daily[i] > 5) {
+        if (precipdaily[i] > 5) {
           # remove interception/runoff then set as Peff
-          peff[i] <- precip.daily[i] - 5
+          peff[i] <- precipdaily[i] - 5
           # Set bal to 5 so any rain in next day is added
           # without removing 5
           bal <- 5
         } else {
           # no effective rain but the balance increases
-          bal <- precip.daily[i]
+          bal <- precipdaily[i]
         }
       } else if (bal.prev < 5) {
         # some rain this day and
         # less than five previously
-        if (precip.daily[i] + bal.prev > 5) {
+        if (precipdaily[i] + bal.prev > 5) {
           # remove interception/runoff, then set as Peff
-          peff[i] <- precip.daily[i] + bal.prev - 5
+          peff[i] <- precipdaily[i] + bal.prev - 5
           # Set bal to 5 so any rain in next day is added
           # without removing 5
           bal <- 5
         } else {
           # still haven't exceeded 5mm
-          bal <- precip.daily[i] + bal.prev
+          bal <- precipdaily[i] + bal.prev
         }
       } else {
         # interception/runoff has already been removed
         # so add all rain to Peff keep balance at 5
-        peff[i] <- precip.daily[i]
+        peff[i] <- precipdaily[i]
         bal <- 5
       }
     }

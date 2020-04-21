@@ -12,12 +12,11 @@ bom_db_import(db, datapath, stations = NULL, allow.missing = TRUE)
 
 \item{datapath}{Character path to one of the following: an individual weather
 station data file in CSV format; a directory containing one or more data
-files; or a zip file containing one or more such files. Zip files are
-assumed to have a '.zip' extension.}
+files; or a zip file containing one or more such files. If a zip file
+(identified by a '.zip' extension) the path should be to a single file.}
 
 \item{stations}{Either NULL (default) to import data for all stations, or a
-character vector of station identifiers. Ignored if \code{datapath} is a
-single file.}
+character vector of station identifiers. Ignored if \code{datapath} is a}
 
 \item{allow.missing}{If TRUE (default) and specific stations were requested,
 the function will silently ignore any that are missing in the directory or
@@ -33,13 +32,13 @@ zip file. If FALSE, missing stations result in an error.}
 This function can read delimited text data, in the format used by the Bureau
 of Meteorology, from an individual weather station file or a directory or zip
 file containing one or more such files, stations in CSV format, and import
-them into a SQLite database.
-}
-\details{
-In the case of the input data source being a directory or zip file, weather
-station files are identified by searching for names that include 'Data'
-followed by digits and underscores, with the file extension '.txt'. Any
-input records already present in the database are silently ignored.
+them into a SQLite database. In the case of the input data source being a
+directory or zip file, weather station files are identified by searching for
+names that include 'Data' followed by digits and underscores, with the file
+extension '.txt'. Any input records already present in the database are
+silently ignored. Note that fire-related variables (KBDI, drought factor and
+FFDI) are \strong{not} calculated for the new records. call the function
+\code{bom_db_update_fire} to do this.
 }
 \examples{
 \dontrun{
@@ -60,4 +59,7 @@ bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 bom_db_close(DB)
 }
 
+}
+\seealso{
+\code{\link{bom_db_update_fire}}
 }

@@ -2,26 +2,38 @@
 % Please edit documentation in R/db_functions.R
 \name{bom_db_check_datetimes}
 \alias{bom_db_check_datetimes}
-\title{Check that records for a given station form an uninterrupted time series}
+\title{Check that records in a data set form an uninterrupted time series}
 \usage{
-bom_db_check_datetimes(db, station, dbtable = c("aws", "synoptic"))
+bom_db_check_datetimes(dat, daily)
 }
 \arguments{
-\item{db}{A database connection pool object as returned by
-\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
+\item{dat}{A data frame with date columns (integer year, month and day),
+optional time columns (integer hour and minute) and possibly other
+variables. Normally a column of integer station identifiers will be present
+but this is optional. If missing, it will be assumed that all records pertain to
+a single weather station.}
 
-\item{station}{Integer station identifier.}
-
-\item{dbtable}{Either 'AWS' or 'Synoptic'. Case-insensitive and may be
-abbreviated. Default is 'AWS'.}
+\item{daily}{If \code{TRUE}, expect only one record per day and return a
+failed check result if this is not the case. Note that a value must be
+supplied for this argument.}
 }
 \value{
-A named list with elements:
+A nested list with one element per station, where each element is a
+  list consisting of:
   \describe{
-    \item{ok}{TRUE if records form an uninterrupted time series; FALSE otherwise.}
-    \item{err}{If 'ok' is FALSE, message indicating first break in time series.}
+    \item{station}{Integer station identifier (Set to -1 if no station
+      column is provided).}
+    \item{ok}{Logical value indicating success or failure of checks.}
+    \item{gaps}{Dates (as Date objects) before which each gap in the time
+      series occurs.}
+    \item{rec.order}{Indices of data records ordered by date and time.}
   }
 }
 \description{
-Checks whether the records for each station form a non-interrupted time series.
+Given a data frame of daily or sub-daily records for one or more weather
+stations, this function checks whether there are any gaps in the time series.
+A gap is defined as one or more missing days. The input data records can be
+in any order. It is primarily a helper function, called by other functions in
+the package that require an uninterrupted time series, but can also be used
+directly.
 }
