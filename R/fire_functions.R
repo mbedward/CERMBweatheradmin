@@ -341,7 +341,7 @@ bom_db_calculate_ffdi <- function(dat,
   }
 
 
-  # Calculate daily values for rainfall, maximum temperature and KBDI
+  # Calculate daily values for rainfall and maximum temperature
   dat.daily <- dat.stn %>%
     # Tmax by calendar day
     dplyr::group_by(year, month, day) %>%
@@ -363,18 +363,30 @@ bom_db_calculate_ffdi <- function(dat,
     dplyr::summarize(tmaxdaily = dplyr::first(tmaxdaily),
                      precipdaily = dplyr::first(precipdaily)) %>%
 
+    # En
     dplyr::ungroup() %>%
+    dplyr::arrange(year, month, day)
 
-    dplyr::bind_cols(bom_db_drought(.$precipdaily, .$tmaxdaily, av.rainfall))
+
+  # Add KBDI and drought factor to daily data
+  kbdi.dfac <- dat.daily %>%
+    bom_db_kbdi(average.rainfall = av.rainfall, assume.order = TRUE) %>%
+    bom_db_drought(assume.order = TRUE)
+
+  # Check
+  stopifnot(nrow(kbdi.dfac) == nrow(dat.daily))
+
+  dat.daily <- dat.daily %>%
+    dplyr::left_join(kbdi.dfac, by = c("year", "month", "day"))
 
 
+  # Join daily values to original time-step data
   dat.stn <- dat.stn %>%
-    # Join daily value of KBDI to original time-step data
     dplyr::left_join(dat.daily, by = c("year", "month", "day")) %>%
 
     # Add calculated FFDI values and return the data frame.
     # Missing values in any of the input variables will propagate
-    # through to FFDI auto-magically.
+    # through to FFDI.
     dplyr::mutate(ffdi = round(
       2 * exp(0.987 * log(drought) - 0.45 +
                 0.0338 * temperature +
@@ -434,14 +446,14 @@ bom_db_kbdi <- function(dat.daily,
     if (!check$ok) stop(check$err)
   }
 
-  HasPriorKBDI <- "kbdi" %in% colnames(dat.daily)
+  InputKBDI <- "kbdi" %in% colnames(dat.daily)
 
-  if (HasPriorKBDI) {
+  if (InputKBDI) {
     # Identify most recent period with no KBDI values
     start.rec <- .find_na_tail(dat.daily$kbdi)
     if (is.na(start.rec)) {
       # Last rec has KBDI value - nothing to do
-      message("Final day has KBDI value already. Nothing more to do.")
+      message("Final day has KBDI value already. Nothing to do.")
       return(dat.daily)
     }
   } else {
@@ -451,13 +463,13 @@ bom_db_kbdi <- function(dat.daily,
   Ndays <- nrow(dat.daily)
   ET <- numeric(Ndays)
 
-  if (HasPriorKBDI) {
+  if (InputKBDI) {
     Kday <- dat.daily$kbdi
   } else {
     Kday <- numeric(Ndays)
   }
 
-  precipdaily.eff <- bom_db_effective_rainfall(precipdaily)
+  precipdaily.eff <- bom_db_effective_rainfall(dat.daily$precipdaily)
 
   # Term 3 in ET equation, annual rainfall influence
   ET3 <- 1 + 10.88 * exp(-.001736 * average.rainfall)
@@ -465,19 +477,23 @@ bom_db_kbdi <- function(dat.daily,
   # Term 4 in ET equation
   ET4 <- 1e-3
 
-  # First step requires at least two days of KBDI values. If we
-  # don't have any previously calculated values, set the first
-  # two days to the maximum dryness value
+  # First step requires at least two days of KBDI values.
   if (start.rec == 1) {
+    # Starting from scratch - set the first two days to maximum
+    # dryness value
     Kday[1:2] <- 203.2
   } else if (start.rec == 2) {
+    #
     Kday[2] <- Kday[1]
   }
+
+  # start.rec should be >= 3 for loop below
+  start.rec <- max(3, start.rec)
 
   # Helper for KBDI loop below
   clampK <- function(x) min(203.2, max(0, round(x, digits = 1)))
 
-  for (i in 3:Ndays) {
+  for (i in start.rec:Ndays) {
     Kprev <- Kday[i-1]
 
     if (is.na(Kprev)) {
@@ -503,13 +519,15 @@ bom_db_kbdi <- function(dat.daily,
     }
 
     ET1 <- 203.2 - Kprev
-    ET2 <- 0.968 * exp(0.0875 * tmaxdaily[i-1] + 1.5552) - 8.30
+    ET2 <- 0.968 * exp(0.0875 * dat.daily$tmaxdaily[i-1] + 1.5552) - 8.30
     ET[i] <- ((ET1 * ET2) / ET3) * ET4
 
     Kday[i] <- clampK( Kprev - precipdaily.eff[i] + ET[i] )
   }
 
-  stop("!!!FIX ME!!!")
+  dat.daily$kbdi <- Kday
+
+  dat.daily
 }
 
 

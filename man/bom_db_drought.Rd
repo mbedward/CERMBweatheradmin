@@ -2,30 +2,25 @@
 % Please edit documentation in R/fire_functions.R
 \name{bom_db_drought}
 \alias{bom_db_drought}
-\title{Calculate daily KBDI and drought factor values}
+\title{Calculate daily drought factor values}
 \usage{
-bom_db_drought(dat.daily, average.rainfall)
+bom_db_drought(dat.daily, assume.order = FALSE)
 }
 \arguments{
 \item{dat.daily}{A data frame of daily weather data. Must have columns: year,
-month, day, precipdaily, tmaxdaily. Optionally, it can also have columns
-kbdi and drought. Additional columns are permitted but will be ignored.
-See Description for details.}
+month, day, precipdaily, kbdi. Optionally, it can also have column:
+drought. Additional columns are permitted but will be ignored. See
+Description for details.}
 
-\item{average.rainfall}{Reference value for average annual rainfall.}
+\item{assume.order}{If \code{TRUE} the daily data are assumed to be in
+calendar order and form an uninterrupted time series. If \code{FALSE}
+(default) this will be checked. This option provides for more efficient
+processing as part of a pipeline, but should be left at the default when
+the function is called directly.}
 }
 \value{
-A data frame with columns kbdi and drought.
+A data frame with columns: year, month, day, kbdi, drought.
 }
 \description{
-Calculates daily drought factor based on the Keetch-Byram drought index
-Following Finkele et al. (2006), KBDI is calculated as yesterday's KBDI plus
-evapo-transpiration minus effective rainfall. Input is a data frame of daily
-weather data. This must have columns: year, month, day, precipdaily,
-tmaxdaily. Optionally, it can also have columns kbdi and drought. If these
-are present, calculations will be done for the most recent block of records
-with missing values, with preceding records being used to initialize the KBDI
-time series. If the optional columns are absent, or present but with all
-missing values, calculations will be performed for all records using the
-default initialization in which KBDI is set to its maximum value (203.2).
+Blah blah blah
 }
