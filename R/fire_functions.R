@@ -58,7 +58,7 @@ bom_db_update_fire <- function(db,
     }
 
     nrecs.updated <- sapply(table.stations, function(the.station) {
-      .do_update_fire(the.table, the.station, records)
+      .do_update_fire(db, the.table, the.station, records)
     })
 
     data.frame(table = the.table,
@@ -73,7 +73,13 @@ bom_db_update_fire <- function(db,
 }
 
 
-.do_update_fire <- function(the.table, the.station, records) {
+.do_update_fire <- function(db,
+                            the.table,
+                            the.station,
+                            records,
+                            av.rainfall.years = 2001:2015,
+                            min.days.per.year = 300) {
+
   stopifnot(length(the.table) == 1,
             the.table %in% c("aws", "synoptic"))
 
@@ -89,80 +95,111 @@ bom_db_update_fire <- function(db,
                     order by year, month, day, hour, minute;")
 
   dat <- pool::dbGetQuery(db, cmd)
+  if (nrow(dat) == 0) return (0)
 
-  if (nrow(dat) > 0) {
-    if (records == "new") {
-      # Subset to records at the end of the time series that do
-      # not have FFDI values plus 20 days of preceding records
-      # (for drought factor calculation)
-      irec <- .find_na_tail(dat$ffdi)
 
-      if (is.na(irec)) {
-        # Last record has FFDI value - nothing to do
-        nmissing <- 0
-      } else {
-        # Date of earliest record in subset
-        date.missing <- .ymd_to_date(dat$year[irec], dat$month[irec], dat$day[irec])
+  dat$precipitation <- ifelse(is.na(dat$precipitation), 0, dat$precipitation)
 
-        # Need 20 days of previous data for drought factor calculation
-        # (or all previous records if less than 20 days exist)
-        ymd.start <- .date_to_ymd( date.missing - 20 )
+  # Check if average rainfall can be determined for the reference period
+  xdat <- dat %>%
+    dplyr::filter(year %in% av.rainfall.years)
+
+  xcheck <- xdat %>%
+    dplyr::group_by(year) %>%
+    dplyr::summarize(ndays = dplyr::n_distinct(month, day))
+
+  if (!all(av.rainfall.years %in% xcheck$year) ||
+      !all(xcheck$ndays >= min.days.per.year)) {
+    warning("Unable to calculate average annual rainfall for station ",
+            dat$station[1],
+            immediate. = TRUE)
+
+    return(0)
+  }
+
+  xdat <- .do_daily_rainfall()
+
+  xdat <- xdat %>%
+    # might have ended up with a raindate just outside the
+    # reference period
+    dplyr::filter(year %in% av.rainfall.years) %>%
+    group_by(year) %>%
+    summarize(totalrain = sum(totalrain))
+
+  av.rainfall <- mean(xdat$totalrain)
+
+
+  if (records == "new") {
+    # Subset to records at the end of the time series that do
+    # not have FFDI values plus 20 days of preceding records
+    # (for drought factor calculation)
+    irec <- .find_na_tail(dat$ffdi)
+
+    if (is.na(irec)) {
+      # Last record has FFDI value - nothing to do
+      nmissing <- 0
+    } else {
+      # Date of earliest record in subset
+      date.missing <- .ymd_to_date(dat$year[irec], dat$month[irec], dat$day[irec])
+
+      # Need 20 days of previous data for drought factor calculation
+      # (or all previous records if less than 20 days exist)
+      date.start <- date.missing - 20
+
+      dat <- dat %>%
+        dplyr::filter(.ymd_to_date(year, month, day) >= date.start)
+
+      # Check whether the data records form an uninterrupted daily
+      # time series
+      check <- bom_db_check_datetimes(dat, daily = FALSE)[[1]]
+      if (!check$ok) {
+        # if there are gaps we can only work with the most recent
+        # uninterrupted subset
+        gap.date <- tail(check$gaps, 1)
+        ymd.start <- .date_to_ymd(gap.date)
 
         dat <- dat %>%
           dplyr::filter(year >= ymd.start$year,
                         month >= ymd.start$month,
                         day >= ymd.start$day)
-
-        # Check whether the data records form an uninterrupted daily
-        # time series
-        check <- bom_db_check_datetimes(dat, daily = FALSE)
-        if (!check$ok) {
-          # if there are gaps we can only work with the most recent
-          # uninterrupted subset
-          gap.date <- tail(check$gaps, 1)
-          ymd.start <- .date_to_ymd(gap.date)
-
-          dat <- dat %>%
-            dplyr::filter(year >= ymd.start$year,
-                          month >= ymd.start$month,
-                          day >= ymd.start$day)
-        }
       }
     }
-
-    dat.ffdi <- bom_db_calculate_ffdi(dat)
-
-    # update table
-    # TODO - there must be a less verbose way of doing this with SQL
-    nrecs.updated <- pool::poolWithTransaction(db, function(con) {
-      DBI::dbWriteTable(con, "ffdi_tmp", dat.ffdi, overwrite = TRUE)
-
-      cmd <- glue::glue("update {the.table} as a
-                        set (tmaxdaily, precipdaily, kbdi, drought, ffdi) = (
-                          select tmaxdaily, precipdaily, kbdi, drought, ffdi
-                          from ffdi_tmp as b
-                          where a.station = b.station and
-                          a.year = b.year and
-                          a.month = b.month and
-                          a.day = b.day and
-                          a.hour = b.hour and
-                          a.minute = b.minute)
-                        where exists (select 1
-                          from ffdi_tmp as b
-                          where a.station = b.station and
-                          a.year = b.year and
-                          a.month = b.month and
-                          a.day = b.day and
-                          a.hour = b.hour and
-                          a.minute = b.minute);")
-
-      nrecs <- DBI::dbExecute(con, cmd)
-
-      DBI::dbExecute(con, "drop table mydata_tmp;")
-
-      nrecs
-    })
   }
+
+  dat.ffdi <- bom_db_calculate_ffdi(dat,
+                                    datatype = the.table,
+                                    av.rainfall.value = av.rainfall)
+
+  # update table
+  # TODO - there must be a less verbose way of doing this with SQL
+  nrecs.updated <- pool::poolWithTransaction(db, function(con) {
+    DBI::dbWriteTable(con, "ffdi_tmp", dat.ffdi, overwrite = TRUE)
+
+    cmd <- glue::glue("update {the.table} as a
+                       set (tmaxdaily, precipdaily, kbdi, drought, ffdi) = (
+                         select tmaxdaily, precipdaily, kbdi, drought, ffdi
+                         from ffdi_tmp as b
+                         where a.station = b.station and
+                         a.year = b.year and
+                         a.month = b.month and
+                         a.day = b.day and
+                         a.hour = b.hour and
+                         a.minute = b.minute)
+                       where exists (select 1
+                         from ffdi_tmp as b
+                         where a.station = b.station and
+                         a.year = b.year and
+                         a.month = b.month and
+                         a.day = b.day and
+                         a.hour = b.hour and
+                         a.minute = b.minute);")
+
+    nrecs <- DBI::dbExecute(con, cmd)
+
+    DBI::dbExecute(con, "drop table mydata_tmp;")
+
+    nrecs
+  })
 
   nrecs.updated
 }
@@ -177,31 +214,31 @@ bom_db_update_fire <- function(db,
 #' format). The function is also used by \code{bom_db_update_fire} which sets the
 #' values of fire-related variables in the database tables.
 #'
-#' @param dat.stn A data frame with records for one or more weather stations.
+#' @param dat A data frame with records for one or more weather stations.
 #'   Normally this will made up of records returned from querying the synoptic
 #'   or AWS tables in the database. If from another data source, the columns
-#'   and column names must conform to those used in the database tables for
-#'   variables used to calculate KBDI and FFDI values:
+#'   and column names must conform to those used in the database tables. The
+#'   required columns are:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',
-#'         'precipitation', 'temperature', 'relhumidity', 'windspeed'}
+#'         'precipitation', 'temperature', 'relhumidity'}
+#'   plus one or both of \code{'windspeed'} or \code{'windgust'} (AWS data).
 #'
-#' @param av.rainfall.years A vector of four digit year numbers for the
-#'   reference period over which average annual rainfall at each weather station
-#'   should be calculated. This is used in the KBDI calculation. Normally the
-#'   reference period will be a sequence of contiguous years, but it does not
-#'   have to be. Default is \code{2001:2015}. Ignored if a value for
-#'   \code{av.rainfall.value} is provided.
+#' @param av.rainfall Average annual rainfall value to use in the calculation of
+#'   KBDI (on which FFDI relies). Note: if the data include multiple weather
+#'   stations, the same average rainfall value is applied to all.
 #'
-#' @param min.days.per.year The minimum number of days of rainfall data required
-#'   for each year specified by \code{av.rainfall.years}. Default is \code{300}.
-#'   Ignored if a value for \code{av.rainfall.value} is provided.
+#' @param datatype Either a specified data type ('AWS' or 'Synoptic') or 'guess'
+#'   (default) to guess the type from the data. Case-insensitive and may be
+#'   abbreviated. The data type controls how rainfall values are aggregated to
+#'   daily values for the calculation of KBDI and drought factor. AWS rainfall
+#'   values are total since 9am, whereas Synoptic values are rainfall for the
+#'   record time step. If 'guess', the function checks whether non-zero rainfall
+#'   values are always ascending during each 24 hour period to 9am which
+#'   indicates AWS data.
 #'
-#' @param av.rainfall.value A vector of average annual rainfall values to use
-#'   instead of calculating averages from weather station data. The vector
-#'   should either consist of a single value to use for all weather stations in
-#'   the input data, or it should provide a value for each station. The default
-#'   (\code{NULL}) means to calculate average annual values from the station
-#'   data.
+#' @param windcol Name of the column of wind speed values to use for FFDI
+#'   calculation. The default is to use \code{'windgust'} if present, otherwise
+#'   \code{'windspeed'}.
 #'
 #' @return A data frame with columns:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',}
@@ -210,7 +247,7 @@ bom_db_update_fire <- function(db,
 #'   \code{'kbdi'} (Keetch-Bryam drought index),
 #'   \code{'drought'} (daily drought factor values),
 #'   \code{'ffdi'} (FFDI value based on daily drought factor and time-step
-#'   values for temperature, wind speed and relative humidity.
+#'     values for temperature, wind speed and relative humidity.
 #'
 #' @examples
 #' \dontrun{
@@ -226,17 +263,17 @@ bom_db_update_fire <- function(db,
 #'   filter(station %in% stns) %>%
 #'   collect()
 #'
-#' # Calculate FFDI for stations
-#' ffdi <- bom_db_ffdi(dat)
+#' # Calculate FFDI for stations using a specified value for
+#' # average annual rainfall
+#' ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.value = 800)
 #'
-#' # Calculate FFDI for stations using non-default range of years
-#' # for average annual rainfall
-#' ffdi <- bom_db_ffdi(dat, av.rainfall.years = 1981:2010)
+#' # Calculate FFDI for stations, with average rainfall being
+#' # calculated over the default reference period of 2001-2015
+#' ffdi <- bom_db_calculate_ffdi(dat)
 #'
-#' # Calculate FFDI for stations using a single value for
-#' # average annual rainfall for all weather stations in the
-#' # input data
-#' ffdi <- bom_db_ffdi(dat, av.rainfall.value = 900)
+#' # Calculate FFDI for stations using a non-default period
+#' # for the calculation of average annual rainfall
+#' ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.years = 2016:2018)
 #'
 #' # If you want to relate FFDI and drought factor values to the
 #' # original sub-daily weather values, join to input data
@@ -251,48 +288,56 @@ bom_db_update_fire <- function(db,
 #' @export
 #'
 bom_db_calculate_ffdi <- function(dat,
-                                  av.rainfall.years = 2001:2015,
-                                  min.days.per.year = 300,
-                                  av.rainfall.value = NULL) {
+                                  av.rainfall = NULL,
+                                  datatype = c("guess", "AWS", "Synoptic"),
+                                  windcol = NULL) {
 
   colnames(dat) <- tolower(colnames(dat))
 
   RequiredCols <- c("station", "year", "month", "day", "hour", "minute",
-                    "precipitation", "temperature", "relhumidity", "windspeed")
+                    "precipitation", "temperature", "relhumidity")
 
-  found <- RequiredCols %in% colnames(dat)
-  if (any(!found)) {
-    stop("The following required columns are not present:\n",
-         RequiredCols[!found])
+  .require_columns(dat, RequiredCols)
+
+  datatype <- match.arg(tolower(datatype), c("guess", "aws", "synoptic"))
+  if (datatype == "guess") {
+    datatype <- .guess_data_type(dat)
+  }
+
+  av.rainfall.value <- av.rainfall[1]
+  if (is.null(av.rainfall) || av.rainfall <= 0) {
+    stop("A valid value for average rainfall is required")
+  }
+
+  if (is.null(windcol)) {
+    if ("windgust" %in% colnames(dat)) {
+      windcol <- "windgust"
+    } else if ("windspeed" %in% colnames(dat)) {
+      windcol <- "windspeed"
+    } else {
+      stop("Did not find 'windgust' or 'windspeed' column and no other name provided")
+    }
+  } else {
+    # A column name was provided
+    windcol <- tolower(windcol)
+    if (!(windcol %in% colnames(dat))) {
+      stop("Missing specified wind speed column: ", windcol)
+    }
   }
 
   stations <- unique(dat$station)
   nstns <- length(stations)
 
-  if (!is.null(av.rainfall.value)) {
-    nval <- length(av.rainfall.value)
-    if (nval != nstns) {
-      if (nval == 1) {
-        av.rainfall.value <- rep(av.rainfall.value, nstns)
-      } else {
-        stop("av.rainfall.value should be length 1 or ", nstns, " (number of stations)")
-      }
-    }
-  }
-
-  res <- lapply(1:nstns, function(istn) {
-    the.stn <- stations[istn]
-    the.av.rainfall <- av.rainfall.value[istn]
-
+  res <- lapply(stations, function(the.stn) {
     dat.stn <- dat %>%
       dplyr::filter(station == the.stn)
 
-    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)
+    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
 
     .do_calculate_ffdi(dat.stn,
-                       av.rainfall.years,
-                       min.days.per.year,
-                       the.av.rainfall)
+                       datatype,
+                       av.rainfall,
+                       windcol)
   })
 
   dplyr::bind_rows(res)
@@ -302,15 +347,26 @@ bom_db_calculate_ffdi <- function(dat,
 # Private worker function for bom_db_ffdi
 #
 .do_calculate_ffdi <- function(dat.stn,
-                               av.rainfall.years,
-                               min.days.per.year,
-                               av.rainfall = NULL) {
+                               datatype,
+                               av.rainfall = NULL,
+                               windcol = NULL) {
 
-  # Check we only have data for a single station and av.rainfall
-  # (if provided) is a single positive value
-  stopifnot(dplyr::n_distinct(dat.stn$station) == 1,
-            is.null(av.rainfall) ||
-              (length(av.rainfall) == 1 && av.rainfall > 0))
+  # Sanity checks on the upstream call
+  stopifnot(dplyr::n_distinct(dat.stn$station) == 1)
+
+  stopifnot(datatype %in% c("aws", "synoptic"))
+
+  stopifnot(!is.null(av.rainfall))
+  stopifnot(length(av.rainfall) == 1 && av.rainfall > 0)
+
+  stopifnot(!is.null(windcol))
+  stopifnot(windcol %in% colnames(dat))
+
+  # Rename the wind speed column to be used for FFDI, giving it a
+  # standard name. This makes the calculation code at the end of
+  # this function a bit easier.
+  dat.stn <- dplyr::rename_at(dat.stn, windcol, ~"..ffdi_wind..")
+
 
   dat.stn <- dat.stn %>%
     # Ensure only one record per time point (this will arbitrarily
@@ -320,65 +376,53 @@ bom_db_calculate_ffdi <- function(dat,
     # Treat missing rainfall values as zero (least worst option)
     dplyr::mutate(precipitation = ifelse(is.na(precipitation), 0, precipitation))
 
-  if (is.null(av.rainfall)) {
-    # Calculate average annual rainfall over the reference years
-    x <- dat.stn %>%
-      dplyr::filter(year %in% av.rainfall.years) %>%
-      dplyr::group_by(year) %>%
-      dplyr::summarize(ndays = dplyr::n_distinct(month, day),
-                       precipitation.year = sum(precipitation))
-
-    if (all(av.rainfall.years %in% x$year) & all(x$ndays >= min.days.per.year)) {
-      av.rainfall <- mean(x$precipitation.year)
-
-    } else {
-      warning("Unable to calculate average annual rainfall for station ",
-              dat.stn$station[1],
-              immediate. = TRUE)
-
-      return(NULL)
-    }
-  }
-
-
-  # Calculate daily values for rainfall and maximum temperature
+  # Tmax by calendar day
   dat.daily <- dat.stn %>%
-    # Tmax by calendar day
     dplyr::group_by(year, month, day) %>%
-    dplyr::mutate(tmaxdaily = max(temperature, na.rm = TRUE)) %>%
-    dplyr::ungroup() %>%
+    dplyr::summarize(tmaxdaily = max(temperature, na.rm = TRUE)) %>%
+    dplyr::ungroup()
 
-    # Rainfall for 0901 to 0900 the following day. Following
-    # the reference MATLAB script, we allocate values to the
-    # first of each pair of calendar days.
-    dplyr::mutate(timestr = paste0(hour, minute),
-                  rainday = dplyr::group_indices(., year, month, day),
-                  rainday = ifelse(timestr < "0901", rainday - 1, rainday)) %>%
+  # Add daily rainfall data
+  dat.daily <- dat.daily %>%
+    dplyr::left_join(
+      bom_db_daily_rainfall(dat.stn, datatype = datatype),
+      by = c("year", "month", "day")
+    )
 
-    dplyr::group_by(rainday) %>%
-    dplyr::mutate(precipdaily = sum(precipitation)) %>%
-
-    dplyr::group_by(year, month, day) %>%
-
-    dplyr::summarize(tmaxdaily = dplyr::first(tmaxdaily),
-                     precipdaily = dplyr::first(precipdaily)) %>%
-
-    # En
+  # Ensure record order
+  dat.stn <- dat.stn %>%
     dplyr::ungroup() %>%
     dplyr::arrange(year, month, day)
 
 
-  # Add KBDI and drought factor to daily data
-  kbdi.dfac <- dat.daily %>%
+  # If previously calculated KBDI and drought values have been provided,
+  # join these to the daily data (only join drought if KBDI is also present)
+  if ("kbdi" %in% colnames(dat.stn)) {
+    tmp <- dat.stn
+
+    if ( !("drought" %in% colnames(dat.stn)) ) {
+      tmp$drought <- NA
+    }
+
+    tmp <- tmp %>%
+      dplyr::group_by(year, month, day) %>%
+      dplyr::summarize(kbdi = first(kbdi),
+                       drought = first(drought))
+
+    dat.daily <- dat.daily %>%
+      dplyr::left_join(tmp, by = c("year", "month", "day"))
+  }
+
+  dat.daily <- dat.daily %>%
     bom_db_kbdi(average.rainfall = av.rainfall, assume.order = TRUE) %>%
     bom_db_drought(assume.order = TRUE)
 
-  # Check
-  stopifnot(nrow(kbdi.dfac) == nrow(dat.daily))
 
-  dat.daily <- dat.daily %>%
-    dplyr::left_join(kbdi.dfac, by = c("year", "month", "day"))
-
+  # Drop any pre-existing columns for daily data from the station data
+  # before joining the newly calculated daily data
+  cols <- setdiff(colnames(dat.daily), c("year", "month", "day"))
+  to.drop <- colnames(dat.stn) %in% cols
+  dat.stn <- dat.stn[, !to.drop]
 
   # Join daily values to original time-step data
   dat.stn <- dat.stn %>%
@@ -390,7 +434,7 @@ bom_db_calculate_ffdi <- function(dat,
     dplyr::mutate(ffdi = round(
       2 * exp(0.987 * log(drought) - 0.45 +
                 0.0338 * temperature +
-                0.0234 * windspeed -
+                0.0234 * ..ffdi_wind.. -  # using standard colname set earlier
                 0.0345 * relhumidity),
       digits = 1))
 
@@ -400,7 +444,7 @@ bom_db_calculate_ffdi <- function(dat,
 }
 
 
-#' Calculate daily KBDI values
+#' Calculate daily KBDI values from data for a single weather station
 #'
 #' Calculates daily values for the Keetch-Byram drought index. Following Finkele
 #' et al. (2006), KBDI is calculated as yesterday's KBDI plus
@@ -413,10 +457,12 @@ bom_db_calculate_ffdi <- function(dat,
 #' calculations will be performed for all records using the default
 #' initialization in which KBDI is set to its maximum value (203.2).
 #'
-#' @param dat.daily A data frame of daily weather data. Must have columns: year,
-#'   month, day, precipdaily, tmaxdaily. Optionally, it can also have column:
-#'   kbdi. Additional columns are permitted but will be ignored. See Description
-#'   for details.
+#' @param dat.daily A data frame of daily weather data. This should be for a
+#'   single weather station. If a 'station' column is present this will be
+#'   checked, otherwise it is assumed. Must have columns: year, month, day,
+#'   precipdaily, tmaxdaily. Optionally, it can also have column: kbdi.
+#'   Additional columns are permitted but will be ignored. See Description for
+#'   details.
 #'
 #' @param average.rainfall Reference value for average annual rainfall.
 #'
@@ -436,13 +482,17 @@ bom_db_kbdi <- function(dat.daily,
 
   colnames(dat.daily) <- tolower(colnames(dat.daily))
 
-  RequiredCols <- c("year", "month", "day", "precipdaily", "tmaxdaily")
-  if (!all(RequiredCols %in% colnames(dat.daily))) {
-    stop("Input data frame must have columns: \n", RequiredCols)
+  # If there is a station column, check there is only a single station
+  if (("station" %in% colnames(dat.daily)) &&
+      dplyr::n_distinct(dat.daily$station) > 1) {
+    stop("This function presently only works with data for a single station")
   }
 
+  RequiredCols <- c("year", "month", "day", "precipdaily", "tmaxdaily")
+  .require_columns(dat.daily, RequiredCols)
+
   if (!assume.order) {
-    check <- bom_db_check_datetimes(dat.daily, daily = TRUE)
+    check <- bom_db_check_datetimes(dat.daily, daily = TRUE)[[1]]
     if (!check$ok) stop(check$err)
   }
 
@@ -531,14 +581,29 @@ bom_db_kbdi <- function(dat.daily,
 }
 
 
-#' Calculate daily drought factor values
+#' Calculate daily drought factor values from data for a single weather station
 #'
-#' Blah blah blah
+#' Calculates daily values for drought factor.Input is a data frame of daily
+#' weather and KBDI data. This must have columns: year, month, day, precipdaily,
+#' tmaxdaily, kbdi. Optionally, it can also have a column: drought. If present,
+#' calculations will be done for the most recent block of records with missing
+#' values, with preceding records being used to initialize the drought factor
+#' time series. If a drought column is absent, or present but with all missing
+#' values, calculations will be performed for all records using the default
+#' initialization in which KBDI is set to its maximum value (203.2).
 #'
-#' @param dat.daily A data frame of daily weather data. Must have columns: year,
-#'   month, day, precipdaily, kbdi. Optionally, it can also have column:
-#'   drought. Additional columns are permitted but will be ignored. See
-#'   Description for details.
+#' Drought factor is based on a moving window of the previous 20 days. Within
+#' this window we search for a rainfall event, defined as consecutive days, each
+#' with rain >2mm. If an event occurs we determine the total rainfall over the
+#' event, and the number of days since the day of highest rainfall within the
+#' event. The resulting values are then combined with KBDI in some darkly
+#' mysterious way.
+#'
+#' @param dat.daily A data frame of daily weather data. This should be for a
+#'   single weather station. If a 'station' column is present this will be
+#'   checked, otherwise it is assumed. Must have columns: year, month, day,
+#'   precipdaily, kbdi. Optionally, it can also have column: drought. Additional
+#'   columns are permitted but will be ignored. See Description for details.
 #'
 #' @param assume.order If \code{TRUE} the daily data are assumed to be in
 #'   calendar order and form an uninterrupted time series. If \code{FALSE}
@@ -552,23 +617,58 @@ bom_db_kbdi <- function(dat.daily,
 #'
 bom_db_drought <- function(dat.daily, assume.order = FALSE) {
 
-  stop("!!!FIX ME!!!")
+  colnames(dat.daily) <- tolower(colnames(dat.daily))
 
-  # Calculate drought factor values.
-  # DF is based on the following over the last 20 days:
-  #   E - rainfall event, defined as consec days each with rain > 2mm
-  #   P - past rainfall amount i.e. sum over event E
-  #   N - days since day of largest rainfall within event
-  DFday <- numeric(Ndays)
-  DFday[1:20] <- NA
+  # If there is a station column, check there is only a single station
+  if (("station" %in% colnames(dat.daily)) &&
+      dplyr::n_distinct(dat.daily$station) > 1) {
+    stop("This function presently only works with data for a single station")
+  }
 
-  # For drought factor, only rainfall of 2mm or more
-  # is considered
-  prDF <- precipdaily
-  prDF[ precipdaily <= 2 ] <- 0
+  RequiredCols <- c("year", "month", "day", "precipdaily", "kbdi")
+  .require_columns(dat.daily, RequiredCols)
 
-  for (i in 21:Ndays) {
-    if (is.na(Kday[i]) || is.na(precipdaily[i])) {
+  if (!assume.order) {
+    check <- bom_db_check_datetimes(dat.daily, daily = TRUE)[[1]]
+    if (!check$ok) stop(check$err)
+  }
+
+  Ndays <- nrow(dat.daily)
+
+  InputDF <- "drought" %in% colnames(dat.daily)
+
+  # Check there are enough days to do something
+  if (Ndays < 21) {
+    message("Too few days (min is 21) to calculate drought factor")
+
+    # Add a drought column if there is not already one and return
+    if (!InputDF) dat.daily$drought <- NA_real_
+    return(dat.daily)
+  }
+
+  if (InputDF) {
+    DFday <- dat.daily$drought
+
+    # Identify most recent period with no drought values
+    start.rec <- .find_na_tail(dat.daily$drought)
+    if (is.na(start.rec)) {
+      # Last rec has drought value - nothing to do
+      message("Final day has drought factor value already. Nothing to do.")
+      return(dat.daily)
+    }
+  } else {
+    DFday <- rep(NA_real_, Ndays)
+    start.rec <- 21
+  }
+
+  # start.rec should be >= 21 for loop below
+  start.rec <- max(21, start.rec)
+
+  # Only rainfall of 2mm or more is considered
+  prDF <- ifelse(dat.daily$precipdaily > 2, dat.daily$precipdaily, 0)
+
+  for (i in start.rec:Ndays) {
+    if (is.na(dat.daily$kbdi[i]) || is.na(dat.daily$precipdaily[i])) {
       DFday[i] <- NA
 
     } else {
@@ -610,17 +710,17 @@ bom_db_drought <- function(dat.daily, assume.order = FALSE) {
         xraw <- (Emax.term^1.3) / (Emax.term^1.3 + P - 2)
       }
 
-      if (Kday[i] >= 20) {
-        xlim <- 75 / (270.525 - 1.267 * Kday[i])
+      if (dat.daily$kbdi[i] >= 20) {
+        xlim <- 75 / (270.525 - 1.267 * dat.daily$kbdi[i])
       } else {
-        xlim <- 1 / (1 + 0.1135 * Kday[i])
+        xlim <- 1 / (1 + 0.1135 * dat.daily$kbdi[i])
       }
 
       x <- min(xraw, xlim)
 
       xfactor <- (41 * x^2 + x) / (40 * x^2 + x + 1)
 
-      DFbase <- 10.5* (1.0 - exp(-(Kday[i] + 30) / 40))
+      DFbase <- 10.5* (1.0 - exp(-(dat.daily$kbdi[i] + 30) / 40))
       DFraw <- DFbase * xfactor
 
       # If DFraw is NA, allow this to propagate to DFday
@@ -628,7 +728,9 @@ bom_db_drought <- function(dat.daily, assume.order = FALSE) {
     }
   }
 
-  data.frame(kbdi = Kday, drought = DFday)
+  dat.daily$drought <- DFday
+
+  dat.daily
 }
 
 
@@ -701,3 +803,108 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 
   peff
 }
+
+
+#' Aggregate rainfall values to daily time steps
+#'
+#' This is primarily a helper function called by other functions when
+#' calculating fire-related variables. It aggregates sub-daily rainfall data to
+#' daily values, taking into account the different conventions used for AWS and
+#' Syoptic data sources. Each value for each day is the total rainfall recorded
+#' from 09:01 that day to 09:00 the following day. If there are any missing days
+#' in the time series, the function will stop with an error.
+#'
+#' @param dat A data set of sub-daily weather records for either an AWS or a
+#'   Synoptic source.
+#'
+#' @param datatype Source type of data. Default is to guess based on data
+#'   values.
+#'
+#' @param crop If \code{TRUE} (default), discard the rainfall for an initial
+#'   part day.
+#'
+#' @return A data frame with columns: station (if present in the input data),
+#'   year, month, day, precipdaily.
+#'
+#' @export
+#'
+bom_db_daily_rainfall <- function(dat,
+                                  datatype = c("guess", "aws", "synoptic"),
+                                  crop = TRUE) {
+
+  colnames(dat) <- tolower(colnames(dat))
+
+  RequiredCols <- c("year", "month", "day", "hour", "minute", "precipitation")
+  .require_columns(dat, RequiredCols)
+
+  HasStation <- "station" %in% colnames(dat)
+  if (!HasStation) dat$station <- 0
+
+  datatype <- match.arg(tolower(datatype), choices = c("guess", "aws", "synoptic"))
+  if (datatype == "guess") {
+    # check first station
+    the.stn <- dat$station[1]
+    datatype <- .guess_data_type(dplyr::filter(dat, station == the.stn))
+  }
+
+  # Helper function to aggregate rain-day values
+  fn_rainday <- function(rain) {
+    rain <- na.omit(rain)
+    if (length(rain) == 0) {
+      0
+    } else {
+      ifelse(datatype == "aws", max(rain), sum(rain))
+    }
+  }
+
+  stns <- unique(dat$station)
+
+  res <- lapply(stns, function(the.stn) {
+    dat.stn <- dplyr::filter(dat, station == the.stn)
+
+    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
+
+    if (!check$ok) {
+      gap.msg <- ""
+      if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
+      msg <- glue::glue("Problem with data for station {the.stn}
+                        {check$err}
+                        {gap.msg}")
+      stop(msg)
+    }
+
+    dat.stn <- dat.stn %>%
+      dplyr::arrange(year, month, day, hour, minute) %>%
+
+      dplyr::mutate(raindate = CERMBweather:::.ymd_to_date(year, month, day),
+                    timestr = sprintf("%02d%02d", hour, minute))
+
+    # Do this bit outside of dplyr to avoid it spuriously converting
+    # dates to integers
+    ii <- dat.stn$timestr < "0901"
+    dat.stn$raindate[ii] <- dat.stn$raindate[ii] - 1
+
+    min.raindate <- min(dat.stn$raindate)
+
+    dat.stn <- dat.stn %>%
+      dplyr::group_by(raindate) %>%
+      dplyr::summarize(precipdaily = fn_rainday(precipitation))
+
+
+    if (crop) dat.stn <- dplyr::filter(dat.stn, raindate > min.raindate)
+
+    # Add year, month day back in, and return
+    dat.stn %>%
+      dplyr::bind_cols(CERMBweather:::.date_to_ymd(.$raindate)) %>%
+      dplyr::select(year, month, day, precipdaily)
+  })
+
+  # Combine results for stations
+  res <- dplyr::bind_rows(res)
+
+  # If there was no station column in the input, remove the temp column
+  if (!HasStation) res$station <- NULL
+
+  res
+}
+

@@ -2,15 +2,16 @@
 % Please edit documentation in R/fire_functions.R
 \name{bom_db_drought}
 \alias{bom_db_drought}
-\title{Calculate daily drought factor values}
+\title{Calculate daily drought factor values from data for a single weather station}
 \usage{
 bom_db_drought(dat.daily, assume.order = FALSE)
 }
 \arguments{
-\item{dat.daily}{A data frame of daily weather data. Must have columns: year,
-month, day, precipdaily, kbdi. Optionally, it can also have column:
-drought. Additional columns are permitted but will be ignored. See
-Description for details.}
+\item{dat.daily}{A data frame of daily weather data. This should be for a
+single weather station. If a 'station' column is present this will be
+checked, otherwise it is assumed. Must have columns: year, month, day,
+precipdaily, kbdi. Optionally, it can also have column: drought. Additional
+columns are permitted but will be ignored. See Description for details.}
 
 \item{assume.order}{If \code{TRUE} the daily data are assumed to be in
 calendar order and form an uninterrupted time series. If \code{FALSE}
@@ -22,5 +23,20 @@ the function is called directly.}
 A data frame with columns: year, month, day, kbdi, drought.
 }
 \description{
-Blah blah blah
+Calculates daily values for drought factor.Input is a data frame of daily
+weather and KBDI data. This must have columns: year, month, day, precipdaily,
+tmaxdaily, kbdi. Optionally, it can also have a column: drought. If present,
+calculations will be done for the most recent block of records with missing
+values, with preceding records being used to initialize the drought factor
+time series. If a drought column is absent, or present but with all missing
+values, calculations will be performed for all records using the default
+initialization in which KBDI is set to its maximum value (203.2).
+}
+\details{
+Drought factor is based on a moving window of the previous 20 days. Within
+this window we search for a rainfall event, defined as consecutive days, each
+with rain >2mm. If an event occurs we determine the total rainfall over the
+event, and the number of days since the day of highest rainfall within the
+event. The resulting values are then combined with KBDI in some darkly
+mysterious way.
 }

@@ -6,37 +6,37 @@
 \usage{
 bom_db_calculate_ffdi(
   dat,
-  av.rainfall.years = 2001:2015,
-  min.days.per.year = 300,
-  av.rainfall.value = NULL
+  av.rainfall = NULL,
+  datatype = c("guess", "AWS", "Synoptic"),
+  windcol = NULL
 )
 }
 \arguments{
-\item{av.rainfall.years}{A vector of four digit year numbers for the
-reference period over which average annual rainfall at each weather station
-should be calculated. This is used in the KBDI calculation. Normally the
-reference period will be a sequence of contiguous years, but it does not
-have to be. Default is \code{2001:2015}. Ignored if a value for
-\code{av.rainfall.value} is provided.}
-
-\item{min.days.per.year}{The minimum number of days of rainfall data required
-for each year specified by \code{av.rainfall.years}. Default is \code{300}.
-Ignored if a value for \code{av.rainfall.value} is provided.}
-
-\item{av.rainfall.value}{A vector of average annual rainfall values to use
-instead of calculating averages from weather station data. The vector
-should either consist of a single value to use for all weather stations in
-the input data, or it should provide a value for each station. The default
-(\code{NULL}) means to calculate average annual values from the station
-data.}
-
-\item{dat.stn}{A data frame with records for one or more weather stations.
+\item{dat}{A data frame with records for one or more weather stations.
 Normally this will made up of records returned from querying the synoptic
 or AWS tables in the database. If from another data source, the columns
-and column names must conform to those used in the database tables for
-variables used to calculate KBDI and FFDI values:
+and column names must conform to those used in the database tables. The
+required columns are:
 \code{'station', 'year', 'month', 'day', 'hour', 'minute',
-      'precipitation', 'temperature', 'relhumidity', 'windspeed'}}
+      'precipitation', 'temperature', 'relhumidity'}
+plus one or both of \code{'windspeed'} or \code{'windgust'} (AWS data).}
+
+\item{av.rainfall}{Average annual rainfall value to use in the calculation of
+KBDI (on which FFDI relies). Note: if the data include multiple weather
+stations, the same average rainfall value is applied to all.}
+
+\item{datatype}{Either a specified data type ('AWS' or 'Synoptic') or 'guess'
+(default) to guess the type from the data. Case-insensitive and may be
+abbreviated. The data type controls how rainfall values are aggregated to
+daily values for the calculation of KBDI and drought factor. AWS rainfall
+values are total since 9am, whereas Synoptic values are rainfall for the
+record time step. If 'guess', the function checks whether non-zero rainfall
+values are always ascending during each 24 hour period to 9am which
+indicates AWS data.}
+
+\item{windcol}{Name of the column of wind speed values to use for FFDI
+calculation. The default is to use \code{'windgust'} if present, otherwise
+\code{'windspeed'}.}
 }
 \value{
 A data frame with columns:
@@ -46,7 +46,7 @@ A data frame with columns:
   \code{'kbdi'} (Keetch-Bryam drought index),
   \code{'drought'} (daily drought factor values),
   \code{'ffdi'} (FFDI value based on daily drought factor and time-step
-  values for temperature, wind speed and relative humidity.
+    values for temperature, wind speed and relative humidity.
 }
 \description{
 This function calculates FFDI (Forest Fire Danger Index)
@@ -70,17 +70,17 @@ dat <- bom_db_synoptic(DB) \%>\%
   filter(station \%in\% stns) \%>\%
   collect()
 
-# Calculate FFDI for stations
-ffdi <- bom_db_ffdi(dat)
+# Calculate FFDI for stations using a specified value for
+# average annual rainfall
+ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.value = 800)
 
-# Calculate FFDI for stations using non-default range of years
-# for average annual rainfall
-ffdi <- bom_db_ffdi(dat, av.rainfall.years = 1981:2010)
+# Calculate FFDI for stations, with average rainfall being
+# calculated over the default reference period of 2001-2015
+ffdi <- bom_db_calculate_ffdi(dat)
 
-# Calculate FFDI for stations using a single value for
-# average annual rainfall for all weather stations in the
-# input data
-ffdi <- bom_db_ffdi(dat, av.rainfall.value = 900)
+# Calculate FFDI for stations using a non-default period
+# for the calculation of average annual rainfall
+ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.years = 2016:2018)
 
 # If you want to relate FFDI and drought factor values to the
 # original sub-daily weather values, join to input data

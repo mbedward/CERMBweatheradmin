@@ -2,15 +2,17 @@
 % Please edit documentation in R/fire_functions.R
 \name{bom_db_kbdi}
 \alias{bom_db_kbdi}
-\title{Calculate daily KBDI values}
+\title{Calculate daily KBDI values from data for a single weather station}
 \usage{
 bom_db_kbdi(dat.daily, average.rainfall, assume.order = FALSE)
 }
 \arguments{
-\item{dat.daily}{A data frame of daily weather data. Must have columns: year,
-month, day, precipdaily, tmaxdaily. Optionally, it can also have column:
-kbdi. Additional columns are permitted but will be ignored. See Description
-for details.}
+\item{dat.daily}{A data frame of daily weather data. This should be for a
+single weather station. If a 'station' column is present this will be
+checked, otherwise it is assumed. Must have columns: year, month, day,
+precipdaily, tmaxdaily. Optionally, it can also have column: kbdi.
+Additional columns are permitted but will be ignored. See Description for
+details.}
 
 \item{average.rainfall}{Reference value for average annual rainfall.}
 

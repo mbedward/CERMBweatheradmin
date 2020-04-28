@@ -35,7 +35,7 @@
 # Adds data type (aws or synoptic) and column types as attributes
 # of the returned data frame.
 .map_fields <- function(dat) {
-  type <- .get_data_type(dat)
+  type <- .get_bomdata_type(dat)
 
   lookup <- dplyr::filter(COLUMN_LOOKUP, datatype == type)
   cnames <- tolower(colnames(dat))
@@ -55,9 +55,11 @@
 }
 
 
-# Determines whether a data set is for AWS or Synoptic data by checking
-# for either of two columns only in AWS data (windgust and AWS flag)
-.get_data_type <- function(dat.raw) {
+# Determines whether a BOM data set is for AWS or Synoptic data by checking
+# for either of two columns only in AWS data (windgust and AWS flag).
+# Note: this is using the column names expected in BOM data, not the standard
+# names used in the database.
+.get_bomdata_type <- function(dat.raw) {
   cnames <- tolower(colnames(dat.raw))
   if (any(stringr::str_detect(cnames, "maximum.windgust|aws.flag"))) {
     "aws"
@@ -135,3 +137,52 @@
   }
 }
 
+
+# Guess the data type of a set of weather records in standard form
+# by checking column names and, if necessary, time steps
+#   'windspeed' AND 'windgust' => aws
+#   'windspeed' only => synoptic
+#   sub-hourly time steps => aws
+#   else => synoptic
+#
+.guess_data_type <- function(dat) {
+  colnames(dat) <- tolower(colnames(dat))
+
+  RequiredCols <- c("year", "month", "day", "hour", "minute")
+  .require_columns(dat, RequiredCols)
+
+  windcols <- c("windspeed", "windgust") %in% colnames(dat)
+  if (all(windcols)) {
+    "aws"
+  } else if (windcols[1]) {
+    "synoptic"
+  } else {
+    # check for sub-hourly time steps
+    i <- dplyr::group_indices(dat, year, month, day, hour)
+    if (n_distinct(i) < length(i)) {
+      "aws"
+    } else {
+      "synoptic"
+    }
+  }
+}
+
+
+# Check that expected column names are present in a data frame and
+# stop with an error message if not.
+.require_columns <- function(dat, expected.colnames, ignore.case = FALSE) {
+  if (ignore.case) fn <- tolower
+  else fn <- identity
+
+  found <- fn(expected.colnames) %in% fn(colnames(dat))
+  if (any(!found)) {
+    stop("The following required columns are not present:\n",
+         paste(expected.colnames[!found], collapse = ", "))
+  }
+}
+
+
+# Convert NA values to zero
+.na2zero <- function(x) {
+  ifelse(is.na(x), 0, x)
+}

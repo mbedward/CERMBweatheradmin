@@ -82,3 +82,51 @@ test_that("find tail missing values in vector", {
   x[11:20] <- NA
   expect_equal(fn(x), 11)
 })
+
+
+test_that("guess data type with only zero rainfall", {
+  fn <- CERMBweather:::.guess_data_type
+
+  dat <- expand.grid(
+    year = 2020,
+    month = 4,
+    day = 1:30,
+    hour = seq(0, 21, by = 3),
+    minute = 0,
+    precipitation = 0)
+
+  expect_equal(fn(dat), "synoptic")
+
+  dat$windgust <- 0
+  expect_equal(fn(dat), "aws")
+})
+
+
+test_that("guess data type synoptic with non-ascending rainfall", {
+  fn <- CERMBweather:::.guess_data_type
+
+  dat <- expand.grid(
+    year = 2020,
+    month = 4,
+    day = 1:30,
+    hour = seq(0, 21, by = 3),
+    minute = 0)
+
+  dat$precipitation <- rep(c(0,5,0,1,0), length = nrow(dat))
+
+  expect_equal(fn(dat), "synoptic")
+})
+
+
+test_that("require cols with and without case", {
+  fn <- CERMBweather:::.require_columns
+
+  dat <- data.frame(a = 1, b = 2, c = 3)
+
+  expect_silent(fn(dat, c("a", "b", "c")))
+  expect_silent(fn(dat, c("A", "b", "C"), ignore.case = TRUE))
+
+  # default is case-sensitive matching
+  testthat::expect_error(fn(dat, "B"), regexp = "not present.*B")
+})
+
