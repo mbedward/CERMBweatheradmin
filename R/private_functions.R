@@ -44,12 +44,12 @@
   if (anyNA(ii)) stop("Unrecognized column name(s): ", colnames(dat)[is.na(ii)])
 
   dbnames <- lookup[["db"]][ii]
-  colnames(dat) <- dbnames
+  ii.keep <- !is.na(dbnames)
 
-  dat <- dat[, !is.na(dbnames)]
+  dat <- dat[, ii.keep]
+  colnames(dat) <- dbnames[ii.keep]
   attr(dat, "datatype") <- type
-
-  attr(dat, "coltypes") <- lookup[["coltype"]][ii]
+  attr(dat, "coltypes") <- lookup[["coltype"]][ii.keep]
 
   dat
 }
