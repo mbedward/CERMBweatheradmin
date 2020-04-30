@@ -152,14 +152,14 @@
   .require_columns(dat, RequiredCols)
 
   windcols <- c("windspeed", "windgust") %in% colnames(dat)
-  if (all(windcols)) {
+  if (windcols[2]) {
     "aws"
   } else if (windcols[1]) {
     "synoptic"
   } else {
     # check for sub-hourly time steps
     i <- dplyr::group_indices(dat, year, month, day, hour)
-    if (n_distinct(i) < length(i)) {
+    if (dplyr::n_distinct(i) < length(i)) {
       "aws"
     } else {
       "synoptic"

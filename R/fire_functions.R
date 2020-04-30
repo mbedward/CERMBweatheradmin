@@ -406,8 +406,8 @@ bom_db_calculate_ffdi <- function(dat,
 
     tmp <- tmp %>%
       dplyr::group_by(year, month, day) %>%
-      dplyr::summarize(kbdi = first(kbdi),
-                       drought = first(drought))
+      dplyr::summarize(kbdi = dplyr::first(kbdi),
+                       drought = dplyr::first(drought))
 
     dat.daily <- dat.daily %>%
       dplyr::left_join(tmp, by = c("year", "month", "day"))
