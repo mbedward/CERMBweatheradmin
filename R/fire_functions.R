@@ -360,7 +360,7 @@ bom_db_calculate_ffdi <- function(dat,
   stopifnot(length(av.rainfall) == 1 && av.rainfall > 0)
 
   stopifnot(!is.null(windcol))
-  stopifnot(windcol %in% colnames(dat))
+  stopifnot(windcol %in% colnames(dat.stn))
 
   # Rename the wind speed column to be used for FFDI, giving it a
   # standard name. This makes the calculation code at the end of
