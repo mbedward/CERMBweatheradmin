@@ -4,23 +4,23 @@
   #
   create_synoptic_table = glue::glue(
     "CREATE TABLE Synoptic (
-    station INTEGER NOT NULL,  -- Integer station identifier assigned by BOM
-    year INTEGER NOT NULL,     -- Four digit year
-    month INTEGER NOT NULL,    -- Month: 1-12
-    day INTEGER NOT NULL,      -- Day: 1-31
-    hour INTEGER NOT NULL,     -- Hour: 0-23
-    minute INTEGER NOT NULL,   -- Minute: 0-59
-    precipitation REAL,        -- Rainfall (mm)
-    temperature REAL,          -- Temperature (degrees Celsius)
-    relhumidity REAL,          -- Relative humidity (percentage)
-    windspeed REAL,            -- Wind speed (km/h)
-    winddir REAL,              -- Wind direction (degrees)
-    tmaxdaily REAL,            -- Maximum temperature per calendar day
-    precipdaily REAL,          -- Total rainfall between 09:01 and 09:00 next day
-    kbdi REAL,                 -- Keetch-Bryam drought index based on average rainfall
-                               --   at the station for 2001-2015
-    drought REAL,              -- Drought factor
-    ffdi REAL,                 -- Forest fire danger index
+    station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
+    year INTEGER NOT NULL,         -- Four digit year
+    month INTEGER NOT NULL,        -- Month: 1-12
+    day INTEGER NOT NULL,          -- Day: 1-31
+    hour INTEGER NOT NULL,         -- Hour: 0-23
+    minute INTEGER NOT NULL,       -- Minute: 0-59
+    precipitation REAL,            -- Rainfall (mm)
+    temperature REAL,              -- Temperature (degrees Celsius)
+    relhumidity REAL,              -- Relative humidity (percentage)
+    windspeed REAL,                -- Wind speed (km/h)
+    winddir REAL,                  -- Wind direction (degrees)
+    tmaxdaily REAL DEFAULT NULL,   -- Maximum temperature per calendar day
+    precipdaily REAL DEFAULT NULL, -- Total rainfall between 09:01 and 09:00 next day
+    kbdi REAL DEFAULT NULL,        -- Keetch-Bryam drought index based on average rainfall
+                                   --   at the station for 2001-2015
+    drought REAL DEFAULT NULL,     -- Drought factor
+    ffdi REAL DEFAULT NULL,        -- Forest fire danger index
 
     UNIQUE(station, year, month, day, hour, minute),
 
@@ -39,24 +39,24 @@
   #
   create_aws_table = glue::glue(
     "CREATE TABLE AWS (
-    station INTEGER NOT NULL,  -- Integer station identifier assigned by BOM
-    year INTEGER NOT NULL,     -- Four digit year
-    month INTEGER NOT NULL,    -- Month: 1-12
-    day INTEGER NOT NULL,      -- Day: 1-31
-    hour INTEGER NOT NULL,     -- Hour: 0-23
-    minute INTEGER NOT NULL,   -- Minute: 0-59
-    precipitation REAL,        -- Rainfall (mm)
-    temperature REAL,          -- Temperature (degrees Celsius)
-    relhumidity REAL,          -- Relative humidity (percentage)
-    windspeed REAL,            -- Wind speed (km/h)
-    winddir REAL,              -- Wind direction (degrees)
-    windgust REAL,             -- Maximum wind speed in last 10 minutes (km/h)
-    tmaxdaily REAL,            -- Maximum temperature per calendar day
-    precipdaily REAL,          -- Total rainfall between 09:01 and 09:00 next day
-    kbdi REAL,                 -- Keetch-Bryam drought index based on average rainfall
-                               --   at the station for 2001-2015
-    drought REAL,              -- Drought factor
-    ffdi REAL,                 -- Forest fire danger index
+    station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
+    year INTEGER NOT NULL,         -- Four digit year
+    month INTEGER NOT NULL,        -- Month: 1-12
+    day INTEGER NOT NULL,          -- Day: 1-31
+    hour INTEGER NOT NULL,         -- Hour: 0-23
+    minute INTEGER NOT NULL,       -- Minute: 0-59
+    precipitation REAL,            -- Rainfall (mm)
+    temperature REAL,              -- Temperature (degrees Celsius)
+    relhumidity REAL,              -- Relative humidity (percentage)
+    windspeed REAL,                -- Wind speed (km/h)
+    winddir REAL,                  -- Wind direction (degrees)
+    windgust REAL,                 -- Maximum wind speed in last 10 minutes (km/h)
+    tmaxdaily REAL DEFAULT NULL,   -- Maximum temperature per calendar day
+    precipdaily REAL DEFAULT NULL, -- Total rainfall between 09:01 and 09:00 next day
+    kbdi REAL DEFAULT NULL,        -- Keetch-Bryam drought index based on average rainfall
+                                   --   at the station for 2001-2015
+    drought REAL DEFAULT NULL,     -- Drought factor
+    ffdi REAL DEFAULT NULL,        -- Forest fire danger index
 
     UNIQUE(station, year, month, day, hour, minute),
 

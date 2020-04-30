@@ -87,8 +87,14 @@ bom_db_import <- function(db,
 #
 .sql_import <- function(dat) {
   tblname <- attributes(dat)$datatype
+
+  varnames <- paste(colnames(dat), collapse = ", ")
   params <- paste(paste0(":", colnames(dat)), collapse = ", ")
-  paste0("INSERT OR IGNORE INTO ", tblname, " VALUES (", params, ")")
+
+  cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
+                    ({varnames})
+                    VALUES ({params});")
+  cmd
 }
 
 
