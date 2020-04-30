@@ -97,8 +97,7 @@ bom_db_update_fire <- function(db,
   dat <- pool::dbGetQuery(db, cmd)
   if (nrow(dat) == 0) return (0)
 
-
-  dat$precipitation <- ifelse(is.na(dat$precipitation), 0, dat$precipitation)
+  dat$precipitation <- .na2zero(dat$precipitation)
 
   # Check if average rainfall can be determined for the reference period
   xdat <- dat %>%
@@ -117,14 +116,13 @@ bom_db_update_fire <- function(db,
     return(0)
   }
 
-  xdat <- .do_daily_rainfall()
+  xdat <- dat %>%
+    dplyr::filter(year %in% av.rainfall.years) %>%
+    bom_db_daily_rainfall(datatype = the.table, crop = TRUE)
 
   xdat <- xdat %>%
-    # might have ended up with a raindate just outside the
-    # reference period
-    dplyr::filter(year %in% av.rainfall.years) %>%
-    group_by(year) %>%
-    summarize(totalrain = sum(totalrain))
+    dplyr::group_by(year) %>%
+    dplyr::summarize(totalrain = sum(precipdaily))
 
   av.rainfall <- mean(xdat$totalrain)
 
@@ -167,8 +165,8 @@ bom_db_update_fire <- function(db,
   }
 
   dat.ffdi <- bom_db_calculate_ffdi(dat,
-                                    datatype = the.table,
-                                    av.rainfall.value = av.rainfall)
+                                    av.rainfall = av.rainfall,
+                                    datatype = the.table)
 
   # update table
   # TODO - there must be a less verbose way of doing this with SQL
@@ -254,33 +252,12 @@ bom_db_update_fire <- function(db,
 #' library(CERMBweather)
 #' library(dplyr, warn.conflicts = FALSE)
 #'
-#' # Get synoptic data for selected weather stations
-#' DB <- bom_db_open("/path/to/database/BOM.db")
-#'
-#' stns <- c(1006, 1007, 1019, 1020)
-#'
-#' dat <- bom_db_synoptic(DB) %>%
-#'   filter(station %in% stns) %>%
-#'   collect()
-#'
-#' # Calculate FFDI for stations using a specified value for
-#' # average annual rainfall
-#' ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.value = 800)
-#'
-#' # Calculate FFDI for stations, with average rainfall being
-#' # calculated over the default reference period of 2001-2015
-#' ffdi <- bom_db_calculate_ffdi(dat)
-#'
-#' # Calculate FFDI for stations using a non-default period
-#' # for the calculation of average annual rainfall
-#' ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.years = 2016:2018)
+#' dat.ffdi <- bom_db_calculate_ffdi(dat.stations, av.rainfall = 800)
 #'
 #' # If you want to relate FFDI and drought factor values to the
 #' # original sub-daily weather values, join to input data
-#' ffdi <- left_join(dat, ffdi,
+#' dat.ffdi <- left_join(dat.stations, dat.ffdi,
 #'                   by = c("station", "year", "month", "day", "hour", "minute"))
-#'
-#' bom_db_close(DB)
 #' }
 #'
 #' @seealso \code{\link{bom_db_update_fire}}
@@ -304,7 +281,7 @@ bom_db_calculate_ffdi <- function(dat,
     datatype <- .guess_data_type(dat)
   }
 
-  av.rainfall.value <- av.rainfall[1]
+  av.rainfall <- av.rainfall[1]
   if (is.null(av.rainfall) || av.rainfall <= 0) {
     stop("A valid value for average rainfall is required")
   }
@@ -374,7 +351,7 @@ bom_db_calculate_ffdi <- function(dat,
     dplyr::distinct(year, month, day, hour, minute, .keep_all = TRUE) %>%
 
     # Treat missing rainfall values as zero (least worst option)
-    dplyr::mutate(precipitation = ifelse(is.na(precipitation), 0, precipitation))
+    dplyr::mutate(precipitation = .na2zero(precipitation))
 
   # Tmax by calendar day
   dat.daily <- dat.stn %>%
@@ -388,6 +365,11 @@ bom_db_calculate_ffdi <- function(dat,
       bom_db_daily_rainfall(dat.stn, datatype = datatype),
       by = c("year", "month", "day")
     )
+
+  # Guard against a missing daily rainfall value which can arise
+  # if the aggregated daily rainfall series ends up being one day
+  # shorter than the station data
+  dat.daily$precipdaily <- .na2zero(dat.daily$precipdaily)
 
   # Ensure record order
   dat.stn <- dat.stn %>%
@@ -830,7 +812,7 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 #'
 bom_db_daily_rainfall <- function(dat,
                                   datatype = c("guess", "aws", "synoptic"),
-                                  crop = TRUE) {
+                                  crop = FALSE) {
 
   colnames(dat) <- tolower(colnames(dat))
 

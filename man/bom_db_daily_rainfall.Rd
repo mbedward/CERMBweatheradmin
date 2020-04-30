@@ -7,7 +7,7 @@
 bom_db_daily_rainfall(
   dat,
   datatype = c("guess", "aws", "synoptic"),
-  crop = TRUE
+  crop = FALSE
 )
 }
 \arguments{

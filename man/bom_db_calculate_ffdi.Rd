@@ -61,33 +61,12 @@ values of fire-related variables in the database tables.
 library(CERMBweather)
 library(dplyr, warn.conflicts = FALSE)
 
-# Get synoptic data for selected weather stations
-DB <- bom_db_open("/path/to/database/BOM.db")
-
-stns <- c(1006, 1007, 1019, 1020)
-
-dat <- bom_db_synoptic(DB) \%>\%
-  filter(station \%in\% stns) \%>\%
-  collect()
-
-# Calculate FFDI for stations using a specified value for
-# average annual rainfall
-ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.value = 800)
-
-# Calculate FFDI for stations, with average rainfall being
-# calculated over the default reference period of 2001-2015
-ffdi <- bom_db_calculate_ffdi(dat)
-
-# Calculate FFDI for stations using a non-default period
-# for the calculation of average annual rainfall
-ffdi <- bom_db_calculate_ffdi(dat, av.rainfall.years = 2016:2018)
+dat.ffdi <- bom_db_calculate_ffdi(dat.stations, av.rainfall = 800)
 
 # If you want to relate FFDI and drought factor values to the
 # original sub-daily weather values, join to input data
-ffdi <- left_join(dat, ffdi,
+dat.ffdi <- left_join(dat.stations, dat.ffdi,
                   by = c("station", "year", "month", "day", "hour", "minute"))
-
-bom_db_close(DB)
 }
 
 }

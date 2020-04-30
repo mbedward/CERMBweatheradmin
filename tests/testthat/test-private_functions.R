@@ -157,3 +157,18 @@ test_that("require cols with and without case", {
   testthat::expect_error(fn(dat, "B"), regexp = "not present.*B")
 })
 
+
+test_that("convert NA to zero in vector", {
+  Ndata <- 100
+  Nmiss <- 20
+
+  ii <- sample(Ndata, Nmiss)
+  x <- 1:Ndata
+  x[ii] <- NA
+
+  x2 <- CERMBweather:::.na2zero(x)
+
+  expect_false(anyNA(x2))
+  expect_equal(length(x2), Ndata)
+  expect_equal(sum(x2 == 0), Nmiss)
+})
