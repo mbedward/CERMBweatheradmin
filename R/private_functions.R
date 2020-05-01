@@ -141,7 +141,6 @@
 # Guess the data type of a set of weather records in standard form
 # by checking column names and, if necessary, time steps
 #   'windspeed' AND 'windgust' => aws
-#   'windspeed' only => synoptic
 #   sub-hourly time steps => aws
 #   else => synoptic
 #
@@ -152,10 +151,8 @@
   .require_columns(dat, RequiredCols)
 
   windcols <- c("windspeed", "windgust") %in% colnames(dat)
-  if (windcols[2]) {
+  if (all(windcols)) {
     "aws"
-  } else if (windcols[1]) {
-    "synoptic"
   } else {
     # check for sub-hourly time steps
     i <- dplyr::group_indices(dat, year, month, day, hour)

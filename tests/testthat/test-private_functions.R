@@ -84,7 +84,7 @@ test_that("find tail missing values in vector", {
 })
 
 
-test_that("guess data type aws with windgust col", {
+test_that("guess data type aws with windspeed and windgust col", {
   fn <- CERMBweather:::.guess_data_type
 
   dat <- expand.grid(
@@ -94,24 +94,10 @@ test_that("guess data type aws with windgust col", {
     hour = 1,
     minute = 0,
     precipitation = 0,
+    windspeed = 10,
     windgust = 42)
 
   expect_equal(fn(dat), "aws")
-})
-
-test_that("guess data type synoptic with only windspeed col", {
-  fn <- CERMBweather:::.guess_data_type
-
-  dat <- expand.grid(
-    year = 2020,
-    month = 4,
-    day = 1,
-    hour = 1,
-    minute = 0,
-    precipitation = 0,
-    windspeed = 42)
-
-  expect_equal(fn(dat), "synoptic")
 })
 
 test_that("guess data type aws with sub-hourly time steps", {
