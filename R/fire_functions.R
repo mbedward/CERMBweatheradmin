@@ -90,7 +90,8 @@ bom_db_update_fire <- function(db,
 
   nrecs.updated <- 0
 
-  cmd <- glue::glue("select * from {the.table}
+  # Note: including SQLite rowid in the query
+  cmd <- glue::glue("select rowid, * from {the.table}
                     where station = {the.station}
                     order by year, month, day, hour, minute;")
 
@@ -135,7 +136,8 @@ bom_db_update_fire <- function(db,
 
     if (is.na(irec)) {
       # Last record has FFDI value - nothing to do
-      nmissing <- 0
+      return(0)
+
     } else {
       # Date of earliest record in subset
       date.missing <- .ymd_to_date(dat$year[irec], dat$month[irec], dat$day[irec])
@@ -168,33 +170,30 @@ bom_db_update_fire <- function(db,
                                     av.rainfall = av.rainfall,
                                     datatype = the.table)
 
-  # update table
-  # TODO - there must be a less verbose way of doing this with SQL
-  nrecs.updated <- pool::poolWithTransaction(db, function(con) {
-    DBI::dbWriteTable(con, "ffdi_tmp", dat.ffdi, overwrite = TRUE)
+  # Update the source table
+  #
+  dat.repl <- dat %>%
+    dplyr::select(-(tmaxdaily:ffdi)) %>%
+    dplyr::left_join(dat.ffdi)
 
-    cmd <- glue::glue("update {the.table} as a
-                       set (tmaxdaily, precipdaily, kbdi, drought, ffdi) = (
-                         select tmaxdaily, precipdaily, kbdi, drought, ffdi
-                         from ffdi_tmp as b
-                         where a.station = b.station and
-                         a.year = b.year and
-                         a.month = b.month and
-                         a.day = b.day and
-                         a.hour = b.hour and
-                         a.minute = b.minute)
-                       where exists (select 1
-                         from ffdi_tmp as b
-                         where a.station = b.station and
-                         a.year = b.year and
-                         a.month = b.month and
-                         a.day = b.day and
-                         a.hour = b.hour and
-                         a.minute = b.minute);")
+  nrecs.updated <- pool::poolWithTransaction(DB, function(con) {
+    DBI::dbExecute(DB, "drop table if exists ffdi_tmp;")
 
-    nrecs <- DBI::dbExecute(con, cmd)
+    DBI::dbWriteTable(con, "ffdi_tmp", dat.repl)
 
-    DBI::dbExecute(con, "drop table mydata_tmp;")
+    varnames <- paste(colnames(dat.repl), collapse = ", ")
+    placeholders <- paste(paste0(":", colnames(dat.repl)), collapse = ", ")
+
+    cmd <- glue::glue("replace into {the.table}
+                    ({varnames})
+                    VALUES ({placeholders});")
+
+    res <- DBI::dbSendStatement(con, cmd)
+    res <- DBI::dbBind(res, params = dat.repl)
+    nrecs <- DBI::dbGetRowsAffected(res)
+    DBI::dbClearResult(res)
+
+    DBI::dbExecute(con, "drop table ffdi_tmp;")
 
     nrecs
   })
