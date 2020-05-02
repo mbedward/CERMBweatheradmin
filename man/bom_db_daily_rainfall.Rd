@@ -7,7 +7,8 @@
 bom_db_daily_rainfall(
   dat,
   datatype = c("guess", "aws", "synoptic"),
-  crop = FALSE
+  crop = FALSE,
+  on.error = c("stop", "null")
 )
 }
 \arguments{
@@ -19,6 +20,10 @@ values.}
 
 \item{crop}{If \code{TRUE} (default), discard the rainfall for an initial
 part day.}
+
+\item{on.error}{Action to perform if there is any interruption in the time
+series. If \code{'stop'}, the function will stop with an error message. If
+\code{'null'}, the function will return NULL.}
 }
 \value{
 A data frame with columns: station (if present in the input data),
@@ -30,5 +35,6 @@ calculating fire-related variables. It aggregates sub-daily rainfall data to
 daily values, taking into account the different conventions used for AWS and
 Syoptic data sources. Each value for each day is the total rainfall recorded
 from 09:01 that day to 09:00 the following day. If there are any missing days
-in the time series, the function will stop with an error.
+in the time series, the function will either stop with an error or return
+\code{NULL} depending on the value of the \code{on.error} argument.
 }

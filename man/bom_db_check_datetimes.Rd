@@ -26,7 +26,6 @@ A nested list with one element per station, where each element is a
     \item{ok}{Logical value indicating success or failure of checks.}
     \item{gaps}{Dates (as Date objects) before which each gap in the time
       series occurs.}
-    \item{rec.order}{Indices of data records ordered by date and time.}
   }
 }
 \description{

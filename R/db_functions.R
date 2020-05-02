@@ -588,7 +588,6 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
 #'     \item{ok}{Logical value indicating success or failure of checks.}
 #'     \item{gaps}{Dates (as Date objects) before which each gap in the time
 #'       series occurs.}
-#'     \item{rec.order}{Indices of data records ordered by date and time.}
 #'   }
 #'
 #' @export
@@ -625,18 +624,15 @@ bom_db_check_datetimes <- function(dat, daily) {
     res <- list(station = stn,
                 ok = TRUE,
                 err = NULL,
-                gaps = NULL,
-                rec.order = NULL)
+                gaps = NULL)
 
     # If less than two records, gaps and order do not apply
     if (nrow(dat.stn) < 2) {
-      res$rec.order <- seq_len(nrow(dat.stn))
       return(res)
     }
 
     dat.stn <- dat.stn %>%
-      dplyr::mutate(.recindex = dplyr::row_number(),
-                    date = .ymd_to_date(year, month, day))
+      dplyr::mutate(date = .ymd_to_date(year, month, day))
 
     # If only daily records are expected, check and return
     # early if that is not the case
@@ -647,7 +643,6 @@ bom_db_check_datetimes <- function(dat, daily) {
     }
 
     dat.stn <- dplyr::arrange_at(dat.stn, ovars)
-    res$rec.order <- dat.stn$.recindex
 
     # Check that there are no missing days
     dat.stn <- dat.stn %>%

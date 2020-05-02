@@ -57,13 +57,3 @@ test_that("Gaps in a time series are identified", {
 })
 
 
-test_that("Record order is correct", {
-  dat <- data.frame(year = 2020,
-                    month = rep(4:5, each=10),
-                    day = c(30:21, 1:10))
-
-  check <- bom_db_check_datetimes(dat, daily = TRUE)[[1]]
-
-  expect_true(check$ok)
-  expect_equal(check$rec.order, c(10:1, 11:20))
-})

@@ -110,16 +110,20 @@ bom_db_update_fire <- function(db,
 
   if (!all(av.rainfall.years %in% xcheck$year) ||
       !all(xcheck$ndays >= min.days.per.year)) {
-    warning("Unable to calculate average annual rainfall for station ",
-            dat$station[1],
-            immediate. = TRUE)
-
+    msg <- glue::glue("Cannot calculate average annual rainfall for station {the.station}")
+    message(msg, immediate. = TRUE)
     return(0)
   }
 
   xdat <- dat %>%
     dplyr::filter(year %in% av.rainfall.years) %>%
-    bom_db_daily_rainfall(datatype = the.table, crop = TRUE)
+    bom_db_daily_rainfall(datatype = the.table, crop = TRUE, on.error = "null")
+
+  if (is.null(xdat)) {
+    msg <- glue::glue("Interrupted time series for station {the.station}")
+    warning(msg)
+    return(0)
+  }
 
   xdat <- xdat %>%
     dplyr::group_by(year) %>%
@@ -166,9 +170,18 @@ bom_db_update_fire <- function(db,
     }
   }
 
-  dat.ffdi <- bom_db_calculate_ffdi(dat,
-                                    av.rainfall = av.rainfall,
-                                    datatype = the.table)
+  # Allow for calculation failing in the case of an interrupted time
+  # series not detcted earlier
+  dat.ffdi <- NULL
+  tryCatch({
+    dat.ffdi <- bom_db_calculate_ffdi(dat,
+                                      av.rainfall = av.rainfall,
+                                      datatype = the.table)
+  }, error = function(e) {
+    warning(e$message, "\n", immediate. = TRUE)
+  })
+
+  if (is.null(dat.ffdi)) return(0)
 
   # Update the source table
   #
@@ -309,6 +322,15 @@ bom_db_calculate_ffdi <- function(dat,
       dplyr::filter(station == the.stn)
 
     check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
+
+    if (!check$ok) {
+      gap.msg <- ""
+      if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
+      msg <- glue::glue("Problem with data for station {the.stn}
+                        {check$err}
+                        {gap.msg}")
+      stop(msg)
+    }
 
     .do_calculate_ffdi(dat.stn,
                        datatype,
@@ -793,7 +815,8 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 #' daily values, taking into account the different conventions used for AWS and
 #' Syoptic data sources. Each value for each day is the total rainfall recorded
 #' from 09:01 that day to 09:00 the following day. If there are any missing days
-#' in the time series, the function will stop with an error.
+#' in the time series, the function will either stop with an error or return
+#' \code{NULL} depending on the value of the \code{on.error} argument.
 #'
 #' @param dat A data set of sub-daily weather records for either an AWS or a
 #'   Synoptic source.
@@ -804,6 +827,10 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 #' @param crop If \code{TRUE} (default), discard the rainfall for an initial
 #'   part day.
 #'
+#' @param on.error Action to perform if there is any interruption in the time
+#'   series. If \code{'stop'}, the function will stop with an error message. If
+#'   \code{'null'}, the function will return NULL.
+#'
 #' @return A data frame with columns: station (if present in the input data),
 #'   year, month, day, precipdaily.
 #'
@@ -811,7 +838,10 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 #'
 bom_db_daily_rainfall <- function(dat,
                                   datatype = c("guess", "aws", "synoptic"),
-                                  crop = FALSE) {
+                                  crop = FALSE,
+                                  on.error = c("stop", "null")) {
+
+  on.error <- match.arg(on.error)
 
   colnames(dat) <- tolower(colnames(dat))
 
@@ -846,12 +876,16 @@ bom_db_daily_rainfall <- function(dat,
     check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
 
     if (!check$ok) {
-      gap.msg <- ""
-      if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
-      msg <- glue::glue("Problem with data for station {the.stn}
+      if (on.error == "null") {
+        return(NULL)
+      } else {
+        gap.msg <- ""
+        if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
+        msg <- glue::glue("Problem with data for station {the.stn}
                         {check$err}
                         {gap.msg}")
-      stop(msg)
+        stop(msg)
+      }
     }
 
     dat.stn <- dat.stn %>%
@@ -879,6 +913,11 @@ bom_db_daily_rainfall <- function(dat,
       dplyr::bind_cols(CERMBweather:::.date_to_ymd(.$raindate)) %>%
       dplyr::select(year, month, day, precipdaily)
   })
+
+  # Check for problems
+  if (on.error == "null" && any(sapply(res, is.null))) {
+    return(NULL)
+  }
 
   # Combine results for stations
   res <- dplyr::bind_rows(res)
