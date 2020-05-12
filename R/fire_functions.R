@@ -111,7 +111,7 @@ bom_db_update_fire <- function(db,
   if (!all(av.rainfall.years %in% xcheck$year) ||
       !all(xcheck$ndays >= min.days.per.year)) {
     msg <- glue::glue("Cannot calculate average annual rainfall for station {the.station}")
-    message(msg, immediate. = TRUE)
+    message(msg)
     return(0)
   }
 
@@ -187,7 +187,7 @@ bom_db_update_fire <- function(db,
   #
   dat.repl <- dat %>%
     dplyr::select(-(tmaxdaily:ffdi)) %>%
-    dplyr::left_join(dat.ffdi)
+    dplyr::left_join(dat.ffdi, by = c("station", "year", "month", "day", "hour", "minute"))
 
   nrecs.updated <- pool::poolWithTransaction(DB, function(con) {
     DBI::dbExecute(DB, "drop table if exists ffdi_tmp;")
