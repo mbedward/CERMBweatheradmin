@@ -231,7 +231,7 @@ bom_db_update_fire <- function(db,
 #'   required columns are:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',
 #'         'precipitation', 'temperature', 'relhumidity'}
-#'   plus one or both of \code{'windspeed'} or \code{'windgust'} (AWS data).
+#'   plus the specified wind speed column (default: \code{'windspeed'}).
 #'
 #' @param av.rainfall Average annual rainfall value to use in the calculation of
 #'   KBDI (on which FFDI relies). Note: if the data include multiple weather
@@ -247,8 +247,8 @@ bom_db_update_fire <- function(db,
 #'   indicates AWS data.
 #'
 #' @param windcol Name of the column of wind speed values to use for FFDI
-#'   calculation. The default is to use \code{'windgust'} if present, otherwise
-#'   \code{'windspeed'}.
+#'   calculation. The default is to use \code{'windspeed'}. AWS data also has
+#'   a \code{'windgust'} column (maximum wind gust in previous 10 minutes).
 #'
 #' @return A data frame with columns:
 #'   \code{'station', 'year', 'month', 'day', 'hour', 'minute',}
@@ -279,7 +279,7 @@ bom_db_update_fire <- function(db,
 bom_db_calculate_ffdi <- function(dat,
                                   av.rainfall = NULL,
                                   datatype = c("guess", "AWS", "Synoptic"),
-                                  windcol = NULL) {
+                                  windcol = "windspeed") {
 
   colnames(dat) <- tolower(colnames(dat))
 
@@ -298,20 +298,9 @@ bom_db_calculate_ffdi <- function(dat,
     stop("A valid value for average rainfall is required")
   }
 
-  if (is.null(windcol)) {
-    if ("windgust" %in% colnames(dat)) {
-      windcol <- "windgust"
-    } else if ("windspeed" %in% colnames(dat)) {
-      windcol <- "windspeed"
-    } else {
-      stop("Did not find 'windgust' or 'windspeed' column and no other name provided")
-    }
-  } else {
-    # A column name was provided
-    windcol <- tolower(windcol)
-    if (!(windcol %in% colnames(dat))) {
-      stop("Missing specified wind speed column: ", windcol)
-    }
+  windcol <- tolower(windcol)
+  if (!(windcol %in% colnames(dat))) {
+    stop("Missing wind speed column: ", windcol)
   }
 
   stations <- unique(dat$station)

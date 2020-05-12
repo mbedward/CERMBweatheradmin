@@ -8,7 +8,7 @@ bom_db_calculate_ffdi(
   dat,
   av.rainfall = NULL,
   datatype = c("guess", "AWS", "Synoptic"),
-  windcol = NULL
+  windcol = "windspeed"
 )
 }
 \arguments{
@@ -19,7 +19,7 @@ and column names must conform to those used in the database tables. The
 required columns are:
 \code{'station', 'year', 'month', 'day', 'hour', 'minute',
       'precipitation', 'temperature', 'relhumidity'}
-plus one or both of \code{'windspeed'} or \code{'windgust'} (AWS data).}
+plus the specified wind speed column (default: \code{'windspeed'}).}
 
 \item{av.rainfall}{Average annual rainfall value to use in the calculation of
 KBDI (on which FFDI relies). Note: if the data include multiple weather
@@ -35,8 +35,8 @@ values are always ascending during each 24 hour period to 9am which
 indicates AWS data.}
 
 \item{windcol}{Name of the column of wind speed values to use for FFDI
-calculation. The default is to use \code{'windgust'} if present, otherwise
-\code{'windspeed'}.}
+calculation. The default is to use \code{'windspeed'}. AWS data also has
+a \code{'windgust'} column (maximum wind gust in previous 10 minutes).}
 }
 \value{
 A data frame with columns:
