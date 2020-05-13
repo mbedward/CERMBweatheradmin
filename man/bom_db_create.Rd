@@ -17,15 +17,17 @@ A database connection pool object that can be used with other package
   \code{\link{bom_db_close}}.
 }
 \description{
-This function creates a new database with tables for synoptic and AWS data.
-SQLite databases consist of a single file which holds all tables. The file
-extension is arbitrary and may be omitted, but using '.db' or '.sqlite' is
-recommended for sanity.
+This function creates a new database with tables: 'Synoptic' for synoptic
+data records; 'AWS' for automatic weather station data records; and
+'Stations' with details of station names and locations. SQLite databases
+consist of a single file which holds all tables. The file extension is
+arbitrary and may be omitted, but using '.db' or '.sqlite' is recommended for
+sanity.
 }
 \examples{
 \dontrun{
 # Create a new database file with the required weather data tables
-# for AWS and synoptic data
+# for AWS and synoptic data and weather station metadata
 DB <- bom_db_create("c:/foo/bar/weather.db")
 
 # Do things with it

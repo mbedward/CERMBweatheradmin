@@ -211,10 +211,12 @@ bom_db_import <- function(db,
 
 #' Create a new database for weather data
 #'
-#' This function creates a new database with tables for synoptic and AWS data.
-#' SQLite databases consist of a single file which holds all tables. The file
-#' extension is arbitrary and may be omitted, but using '.db' or '.sqlite' is
-#' recommended for sanity.
+#' This function creates a new database with tables: 'Synoptic' for synoptic
+#' data records; 'AWS' for automatic weather station data records; and
+#' 'Stations' with details of station names and locations. SQLite databases
+#' consist of a single file which holds all tables. The file extension is
+#' arbitrary and may be omitted, but using '.db' or '.sqlite' is recommended for
+#' sanity.
 #'
 #' @param dbpath A character path to the new database file. An error is thrown
 #'   if the file already exists.
@@ -229,7 +231,7 @@ bom_db_import <- function(db,
 #' @examples
 #' \dontrun{
 #' # Create a new database file with the required weather data tables
-#' # for AWS and synoptic data
+#' # for AWS and synoptic data and weather station metadata
 #' DB <- bom_db_create("c:/foo/bar/weather.db")
 #'
 #' # Do things with it
@@ -244,15 +246,11 @@ bom_db_create <- function(dbpath) {
 
   DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
 
-  conn <- pool::poolCheckout(DB)
+  pool::dbExecute(DB, SQL_CREATE_TABLES$create_synoptic_table)
+  pool::dbExecute(DB, SQL_CREATE_TABLES$create_aws_table)
+  pool::dbExecute(DB, SQL_CREATE_TABLES$create_stations_table)
 
-  res <- DBI::dbSendQuery(conn, .BOM_SQL$create_synoptic_table)
-  DBI::dbClearResult(res)
-
-  res <- DBI::dbSendQuery(conn, .BOM_SQL$create_aws_table)
-  DBI::dbClearResult(res)
-
-  pool::poolReturn(conn)
+  pool::dbWriteTable(DB, "Stations", CERMBweather::STATION_METADATA, append = TRUE)
 
   DB
 }

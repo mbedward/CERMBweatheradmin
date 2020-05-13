@@ -1,5 +1,5 @@
 ## SQL statements to create database tables
-.BOM_SQL <- list(
+SQL_CREATE_TABLES <- list(
   # Synoptic data records
   #
   create_synoptic_table = glue::glue(
@@ -66,7 +66,25 @@
            (day = 30 AND month <> 2) OR
            (day = 31 AND month IN (1,3,5,7,8,10,12))),
     CHECK (hour >= 0 AND hour <= 23),
-    CHECK (minute >= 0 AND minute <= 59) );")
+    CHECK (minute >= 0 AND minute <= 59) );"),
+
+  # BOM weather station metadata
+  #
+  create_stations_table = glue::glue(
+    "CREATE TABLE Stations (
+    station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
+    name TEXT NOT NULL,            -- Station name
+    start TEXT NOT NULL,           -- Start of operation: month and year
+    aws INTEGER NOT NULL,          -- 1: automatic weather station; 0: synoptic only
+    state TEXT,                    -- State or territory (plus Antarctica)
+    lon REAL NOT NULL,             -- Longitude (decimal degrees)
+    lat REAL NOT NULL,             -- Latitude (decimal degrees)
+
+    UNIQUE(station),
+
+    CHECK (aws IN (0,1)),
+    CHECK (lon > 0),
+    CHECK (lat < 0) );")
 )
 
 
@@ -78,6 +96,6 @@
 )
 
 
-usethis::use_data(.BOM_SQL, .CON_FLAGS, internal = TRUE, overwrite = TRUE)
+usethis::use_data(SQL_CREATE_TABLES, .CON_FLAGS, internal = TRUE, overwrite = TRUE)
 
-rm(.BOM_SQL, .CON_FLAGS)
+rm(SQL_CREATE_TABLES, .CON_FLAGS)
