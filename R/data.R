@@ -5,6 +5,15 @@
 #'
 "COLUMN_LOOKUP"
 
+#' SQL statements to create database tables
+#'
+#' A list of SQL statements used to create the AWS, Synoptic and Stations
+#' tables in a new database.
+#'
+#' @seealso \code{\link{bom_db_create}}
+#'
+"SQL_CREATE_TABLES"
+
 #' Weather station metadata
 #'
 #' A data frame that, for each BOM weather station, gives identifying

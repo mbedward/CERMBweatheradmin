@@ -96,6 +96,7 @@ SQL_CREATE_TABLES <- list(
 )
 
 
-usethis::use_data(SQL_CREATE_TABLES, .CON_FLAGS, internal = TRUE, overwrite = TRUE)
+usethis::use_data(SQL_CREATE_TABLES, overwrite = TRUE)
+usethis::use_data(.CON_FLAGS, internal = TRUE, overwrite = TRUE)
 
 rm(SQL_CREATE_TABLES, .CON_FLAGS)
