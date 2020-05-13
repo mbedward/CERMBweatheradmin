@@ -5,10 +5,10 @@
 #'
 "COLUMN_LOOKUP"
 
-#' AWS metadata
+#' Weather station metadata
 #'
-#' A data frame that, for each Automaotic Weather Station, gives identifying
-#' number, name (locality), position (latitude and longitude), elevation,
-#' and the month and year for which records commenced.
+#' A data frame that, for each BOM weather station, gives identifying
+#' number, name (locality), start of operation (month and year), state
+#' (including 'ANT' for Antarctica), longitude, and latitude.
 #'
-"METADATA_AWS"
+"STATION_METADATA"
