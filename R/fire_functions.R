@@ -10,11 +10,18 @@
 #' the last record with non-missing values. The records must cover a continuous
 #' time series, i.e. no gaps in the sequence of dates.
 #'
+#' KBDI calculations require an average annual precipitation value. This can
+#' either be taken from the station values in the \code{\link{STATION_METADATA}}
+#' table, derived from the NARCLIM 'p12' layer, or calculated from stations
+#' records for the 2001-2015 period. The default, and recommended option, is to
+#' use the NARCLIM station values. Note that at present the database does not
+#' record which option was used so it is up to you to be consistent (!)
+#'
 #' @param db A database connection pool object as returned by
 #'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
 #'
-#' @param tables Names of tables to update. Default is to update both the
-#'   'AWS' and 'Synoptic' tables. Table names may be abbreviated.
+#' @param tables Names of tables to update. The default is to only update the
+#'   'AWS' table. Table names may be abbreviated.
 #'
 #' @param records The records to update: either \code{'new'} (default) to only
 #'   update records with more recent dates and times than the last record with
@@ -27,6 +34,15 @@
 #'   updates will only be performed for these stations. The default is to
 #'   update all stations.
 #'
+#' @param av.rainfall.method Either 'metadata' (default and recommended) to take
+#'   average rainfall values from the \code{STATIONS_METADATA} table; or
+#'   'records' to calculate average rainfall from station records over the period
+#'   2001 - 2015. With the latter option, any station that does not have data
+#'   for the whole of the reference period will be ignored.
+#'
+#' @param quiet If \code{TRUE}, do not print progress information (table and
+#'   station names) to the console during processing. Default is \code{FALSE}.
+#'
 #' @return A vector with named elements giving the number of records updated by
 #'   table.
 #'
@@ -37,10 +53,14 @@
 bom_db_update_fire <- function(db,
                                tables = c("AWS", "Synoptic"),
                                records = c("new", "all"),
-                               stations = NULL) {
+                               stations = NULL,
+                               av.rainfall.method = c("metadata", "records"),
+                               quiet = FALSE) {
   .ensure_connection(db)
 
   records <- match.arg(records)
+
+  av.rainfall.method <- match.arg(av.rainfall.method)
 
   # Case-insensitive match for table names
   tables <- unique(match.arg(tolower(tables),
@@ -57,8 +77,14 @@ bom_db_update_fire <- function(db,
         dplyr::pull(station)
     }
 
-    nrecs.updated <- sapply(table.stations, function(the.station) {
-      .do_update_fire(db, the.table, the.station, records)
+    Nstns <- length(table.stations)
+    nrecs.updated <- sapply(1:Nstns, function(istn) {
+      the.station <- table.stations[istn]
+      if (!quiet) {
+        msg <- glue::glue("{the.table}: {the.station} ({istn}/{Nstns})")
+        message(msg)
+      }
+      .do_update_fire(db, the.table, the.station, records, av.rainfall.method)
     })
 
     data.frame(table = the.table,
@@ -77,8 +103,7 @@ bom_db_update_fire <- function(db,
                             the.table,
                             the.station,
                             records,
-                            av.rainfall.years = 2001:2015,
-                            min.days.per.year = 300) {
+                            av.rainfall.method) {
 
   stopifnot(length(the.table) == 1,
             the.table %in% c("aws", "synoptic"))
@@ -88,10 +113,16 @@ bom_db_update_fire <- function(db,
   stopifnot(length(records) == 1,
             records %in% c("new", "all"))
 
+  stopifnot(length(av.rainfall.method) == 1,
+            av.rainfall.method %in% c("metadata", "records"))
+
+  # Constants used if av.rainfall.method is 'records'
+  AvRainfallYears <- 2001:2015
+  MinDaysPerYear <- 300
+
   nrecs.updated <- 0
 
-  # Note: including SQLite rowid in the query
-  cmd <- glue::glue("select rowid, * from {the.table}
+  cmd <- glue::glue("select * from {the.table}
                     where station = {the.station}
                     order by year, month, day, hour, minute;")
 
@@ -100,37 +131,55 @@ bom_db_update_fire <- function(db,
 
   dat$precipitation <- .na2zero(dat$precipitation)
 
-  # Check if average rainfall can be determined for the reference period
-  xdat <- dat %>%
-    dplyr::filter(year %in% av.rainfall.years)
+  if (av.rainfall.method == "metadata") {
+    i <- which(CERMBweather::STATION_METADATA$station == the.station)
+    if (length(i)) {
+      av.rainfall <- CERMBweather::STATION_METADATA$annualprecip_narclim[i]
+      if (is.na(av.rainfall)) {
+        msg <- glue::glue("Skipping station {the.station}:
+                              missing rainfall value in STATION_METADATA")
+        warning(msg, immediate. = TRUE)
+        return(0)
+      }
+    } else {
+      msg <- glue::glue("Skipping station {the.station}:
+                            not found in STATION_METADATA")
+      warning(msg, immediate. = TRUE)
+      return(0)
+    }
 
-  xcheck <- xdat %>%
-    dplyr::group_by(year) %>%
-    dplyr::summarize(ndays = dplyr::n_distinct(month, day))
+  } else if (av.rainfall.method == "records") {
+    # Check if average rainfall can be determined for the reference period
+    xdat <- dat %>%
+      dplyr::filter(year %in% AvRainfallYears)
 
-  if (!all(av.rainfall.years %in% xcheck$year) ||
-      !all(xcheck$ndays >= min.days.per.year)) {
-    msg <- glue::glue("Cannot calculate average annual rainfall for station {the.station}")
-    message(msg)
-    return(0)
+    xcheck <- xdat %>%
+      dplyr::group_by(year) %>%
+      dplyr::summarize(ndays = dplyr::n_distinct(month, day))
+
+    if (!all(AvRainfallYears %in% xcheck$year) ||
+        !all(xcheck$ndays >= MinDaysPerYear)) {
+      msg <- glue::glue("Cannot calculate average annual rainfall for station {the.station}")
+      message(msg)
+      return(0)
+    }
+
+    xdat <- dat %>%
+      dplyr::filter(year %in% AvRainfallYears) %>%
+      bom_db_daily_rainfall(datatype = the.table, crop = TRUE, on.error = "null")
+
+    if (is.null(xdat)) {
+      msg <- glue::glue("Interrupted time series for station {the.station}")
+      warning(msg)
+      return(0)
+    }
+
+    xdat <- xdat %>%
+      dplyr::group_by(year) %>%
+      dplyr::summarize(totalrain = sum(precipdaily))
+
+    av.rainfall <- mean(xdat$totalrain)
   }
-
-  xdat <- dat %>%
-    dplyr::filter(year %in% av.rainfall.years) %>%
-    bom_db_daily_rainfall(datatype = the.table, crop = TRUE, on.error = "null")
-
-  if (is.null(xdat)) {
-    msg <- glue::glue("Interrupted time series for station {the.station}")
-    warning(msg)
-    return(0)
-  }
-
-  xdat <- xdat %>%
-    dplyr::group_by(year) %>%
-    dplyr::summarize(totalrain = sum(precipdaily))
-
-  av.rainfall <- mean(xdat$totalrain)
-
 
   if (records == "new") {
     # Subset to records at the end of the time series that do
@@ -168,6 +217,9 @@ bom_db_update_fire <- function(db,
                         day >= ymd.start$day)
       }
     }
+  } else {  # records == "all"
+    # Reset fire var values
+    dat <- dplyr::mutate(dat, kbdi = NA, drought = NA, ffdi = NA)
   }
 
   # Allow for calculation failing in the case of an interrupted time

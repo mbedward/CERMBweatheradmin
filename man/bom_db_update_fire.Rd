@@ -8,15 +8,17 @@ bom_db_update_fire(
   db,
   tables = c("AWS", "Synoptic"),
   records = c("new", "all"),
-  stations = NULL
+  stations = NULL,
+  av.rainfall.method = c("metadata", "records"),
+  quiet = FALSE
 )
 }
 \arguments{
 \item{db}{A database connection pool object as returned by
 \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
 
-\item{tables}{Names of tables to update. Default is to update both the
-'AWS' and 'Synoptic' tables. Table names may be abbreviated.}
+\item{tables}{Names of tables to update. The default is to only update the
+'AWS' table. Table names may be abbreviated.}
 
 \item{records}{The records to update: either \code{'new'} (default) to only
 update records with more recent dates and times than the last record with
@@ -28,6 +30,15 @@ time series.}
 \item{stations}{An optional vector of integer station numbers. If provided,
 updates will only be performed for these stations. The default is to
 update all stations.}
+
+\item{av.rainfall.method}{Either 'metadata' (default and recommended) to take
+average rainfall values from the \code{STATIONS_METADATA} table; or
+'records' to calculate average rainfall from station records over the period
+2001 - 2015. With the latter option, any station that does not have data
+for the whole of the reference period will be ignored.}
+
+\item{quiet}{If \code{TRUE}, do not print progress information (table and
+station names) to the console during processing. Default is \code{FALSE}.}
 }
 \value{
 A vector with named elements giving the number of records updated by
@@ -43,6 +54,14 @@ argument, values can be calculated for all records (any previous values are
 replaced), or only for those records with more recent dates and times than
 the last record with non-missing values. The records must cover a continuous
 time series, i.e. no gaps in the sequence of dates.
+}
+\details{
+KBDI calculations require an average annual precipitation value. This can
+either be taken from the station values in the \code{\link{STATION_METADATA}}
+table, derived from the NARCLIM 'p12' layer, or calculated from stations
+records for the 2001-2015 period. The default, and recommended option, is to
+use the NARCLIM station values. Note that at present the database does not
+record which option was used so it is up to you to be consistent (!)
 }
 \seealso{
 \code{\link{bom_db_calculate_ffdi}}
