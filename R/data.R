@@ -18,6 +18,8 @@
 #'
 #' A data frame that, for each BOM weather station, gives identifying
 #' number, name (locality), start of operation (month and year), state
-#' (including 'ANT' for Antarctica), longitude, and latitude.
+#' (including 'ANT' for Antarctica), longitude, and latitude. Also
+#' includes average annual precipitation value for each station based
+#' on the NARCLIM p12 layer.
 #'
 "STATION_METADATA"

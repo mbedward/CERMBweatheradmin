@@ -5,7 +5,7 @@
 \alias{STATION_METADATA}
 \title{Weather station metadata}
 \format{
-An object of class \code{data.frame} with 17885 rows and 7 columns.
+An object of class \code{data.frame} with 17885 rows and 8 columns.
 }
 \usage{
 STATION_METADATA
@@ -13,6 +13,8 @@ STATION_METADATA
 \description{
 A data frame that, for each BOM weather station, gives identifying
 number, name (locality), start of operation (month and year), state
-(including 'ANT' for Antarctica), longitude, and latitude.
+(including 'ANT' for Antarctica), longitude, and latitude. Also
+includes average annual precipitation value for each station based
+on the NARCLIM p12 layer.
 }
 \keyword{datasets}
