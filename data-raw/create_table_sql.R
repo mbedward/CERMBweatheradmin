@@ -79,6 +79,7 @@ SQL_CREATE_TABLES <- list(
     state TEXT,                    -- State or territory (plus Antarctica)
     lon REAL NOT NULL,             -- Longitude (decimal degrees)
     lat REAL NOT NULL,             -- Latitude (decimal degrees)
+    annualprecip_narclim REAL,     -- NARCLIM p12 average annual precipitation
 
     UNIQUE(station),
 
