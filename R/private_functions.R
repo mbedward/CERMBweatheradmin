@@ -2,32 +2,52 @@
 
 # Checks that an object is a valid database connection (pool object) and
 # that the expected weather data tables are present
-.ensure_connection <- function(x) {
-  if (!.is_connection(x)) stop("Object is not a database connection pool")
+.ensure_connection <- function(db) {
+  if (!.is_connection(db)) stop("Object is not a database connection pool")
 
-  if (!DBI::dbIsValid(x))
+  if (!pool::dbIsValid(db))
     stop("Database connection pool has been closed or was not initialized properly")
 
-  if (!.is_weather_db(x))
-    stop("Database is missing one or both of AWS and Synoptic tables")
+  tbls <- tolower(pool::dbListTables(db))
+  Expected <- c("aws", "synoptic")
+  found <- Expected %in% tbls
+
+  if (any(!found)) {
+    # First close connection to avoid a leaked pool object
+    pool::poolClose(db)
+
+    msg1 <- ifelse(sum(!found) == 1, "table", "tables")
+    msg2 <- paste(Expected[!found], collapse=", ")
+    msg <- glue::glue("Database is missing {msg1} {msg2}")
+    stop(msg)
+  }
 }
 
 
-.is_connection <- function(x) {
-  cl <- inherits(x, c("Pool", "R6"), which = TRUE)
+# Checks if the 'Stations' table is present and, if not, creates
+# and populates it. We assume that the db connection is valid.
+.ensure_stations_table <- function(db) {
+  tbls <- tolower(pool::dbListTables(db))
+  found <- "stations" %in% tbls
+  if (!found) {
+    message("Adding Stations table to database")
+
+    pool::poolWithTransaction(db, function(conn) {
+      DBI::dbExecute(conn, SQL_CREATE_TABLES$create_stations_table)
+      DBI::dbAppendTable(conn, "Stations", CERMBweather::STATION_METADATA)
+    })
+  }
+}
+
+
+.is_connection <- function(db) {
+  cl <- inherits(db, c("Pool", "R6"), which = TRUE)
   all(cl == c(1,2))
 }
 
 
-.is_open_connection <- function(x) {
-  .is_connection(x) && DBI::dbIsValid(x)
-}
-
-
-# Checks that AWS and Synoptic tables are present
-.is_weather_db <- function(x) {
-  tbls <- DBI::dbListTables(x)
-  all(c("synoptic", "aws") %in% tolower(tbls))
+.is_open_connection <- function(db) {
+  .is_connection(db) && pool::dbIsValid(db)
 }
 
 

@@ -21,10 +21,7 @@ test_that("ensure database connection checks for tables", {
 
   # This should fail (no tables)
   DB <- pool::dbPool(RSQLite::SQLite(), dbname = ":memory:")
-  tryCatch(
-    expect_error( fn(DB), regexp = "missing.*tables" ),
-    finally = pool::poolClose(DB)
-  )
+  expect_error( fn(DB), regexp = "missing.*tables" )
 })
 
 

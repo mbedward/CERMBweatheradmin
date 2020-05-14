@@ -22,8 +22,8 @@ A database connection pool object that can be used with other package
 }
 \description{
 This function connects an existing database and checks that it contains the
-required tables for synoptic and AWS data. By default, it returns a read-only
-connection.
+required tables for synoptic and AWS data. If a 'Stations' table is not present
+in the database, it is added. By default, a read-only connection is returned.
 }
 \examples{
 \dontrun{

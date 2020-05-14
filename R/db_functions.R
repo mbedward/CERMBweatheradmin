@@ -246,11 +246,13 @@ bom_db_create <- function(dbpath) {
 
   DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
 
-  pool::dbExecute(DB, SQL_CREATE_TABLES$create_synoptic_table)
-  pool::dbExecute(DB, SQL_CREATE_TABLES$create_aws_table)
-  pool::dbExecute(DB, SQL_CREATE_TABLES$create_stations_table)
+  pool::poolWithTransaction(DB, function(conn) {
+    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_synoptic_table)
+    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_aws_table)
+    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_stations_table)
 
-  pool::dbWriteTable(DB, "Stations", CERMBweather::STATION_METADATA, append = TRUE)
+    DBI::dbWriteTable(conn, "Stations", CERMBweather::STATION_METADATA, append = TRUE)
+  })
 
   DB
 }
@@ -258,8 +260,8 @@ bom_db_create <- function(dbpath) {
 #' Open a connection to an existing database
 #'
 #' This function connects an existing database and checks that it contains the
-#' required tables for synoptic and AWS data. By default, it returns a read-only
-#' connection.
+#' required tables for synoptic and AWS data. If a 'Stations' table is not present
+#' in the database, it is added. By default, a read-only connection is returned.
 #'
 #' @param dbpath A character path to an existing database file.
 #'
@@ -292,12 +294,15 @@ bom_db_open <- function(dbpath, readonly = TRUE) {
 
   if (dir.exists(dbpath)) stop("Expected a file not a directory: ", dbpath)
 
-  if (readonly) flags <- RSQLite::SQLITE_RO
-  else flags <- RSQLite::SQLITE_RW
-
-  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = flags)
-
+  # Initially open as read-write for checking tables
+  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RW)
   .ensure_connection(DB)
+  .ensure_stations_table(DB)
+
+  if (readonly) {
+    bom_db_close(DB)
+    DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RO)
+  }
 
   DB
 }
