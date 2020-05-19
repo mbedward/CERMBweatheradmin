@@ -61,6 +61,55 @@ test_that("date to ymd", {
 })
 
 
+test_that("add missing days passes a complete time series", {
+  dates <- seq(as.Date("2020-01-20"), as.Date("2020-02-10"), by = "1 day")
+  dat <- CERMBweather:::.date_to_ymd(dates)
+  dat$hour <- 0
+  dat$minute <- 0
+
+  res <- CERMBweather:::.add_missing_days(dat)
+  expect_equivalent(res, dat)
+  testthat::expect_length(attr(res, "dates.added"), 0)
+})
+
+
+test_that("add missing days with interrupted time series", {
+  dates.all <- seq(as.Date("2020-01-20"), as.Date("2020-02-10"), by = "1 day")
+  n <- length(dates.all)
+  ii <- sample(2:(n-1), size = min(5, n-2))
+  dates.lost <- dates.all[ii]
+  dates.kept <- dates.all[-ii]
+
+  dat <- CERMBweather:::.date_to_ymd(dates.kept)
+  dat$hour <- 0
+  dat$minute <- 0
+  dat <- cbind(station = 123456, dat)
+
+  dat$temperature <- sample(15:25, nrow(dat), replace = TRUE)
+  dat$precipitation <- 0
+  dat$relhumidity <- sample(50:100, nrow(dat), replace = TRUE)
+
+  res <- CERMBweather:::.add_missing_days(dat)
+  res.dates <- CERMBweather:::.ymd_to_date(res$year, res$month, res$day)
+
+  # Day sequence should now be complete
+  expect_setequal(res.dates, dates.all)
+
+  # All records should have the same station number
+  expect_true(all(res$station == 123456))
+
+  # All other non-time cols for new records should be NA
+  ii <- res.dates %in% dates.lost
+  expect_true(all(is.na(res$temperature[ii])))
+  expect_true(all(is.na(res$precipitation[ii])))
+  expect_true(all(is.na(res$relhumidity[ii])))
+
+  # Attribute should hold dates added
+  x <- attr(res, "dates.added")
+  expect_setequal(x, dates.lost)
+})
+
+
 test_that("find tail missing values in vector", {
   fn <- CERMBweather:::.find_na_tail
 
@@ -155,3 +204,18 @@ test_that("convert NA to zero in vector", {
   expect_equal(length(x2), Ndata)
   expect_equal(sum(x2 == 0), Nmiss)
 })
+
+
+test_that(".max_with_na", {
+  fn <- CERMBweather:::.max_with_na
+
+  x <- numeric(0)
+  expect_equal(fn(x), NA)
+
+  x <- rep(NA, 10)
+  expect_equal(fn(x), NA)
+
+  x[10] <- 42
+  expect_equal(fn(x), 42)
+})
+

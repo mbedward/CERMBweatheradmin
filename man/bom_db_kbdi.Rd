@@ -37,3 +37,13 @@ If a kbdi column is absent, or present but with all missing values,
 calculations will be performed for all records using the default
 initialization in which KBDI is set to its maximum value (203.2).
 }
+\details{
+Dealing with missing values: Nny missing daily precipitation values are set
+to zero and a message is issued, Missing daily temperature values are left
+as-is. The value of KBDI depends on the previous day's value. A missing value
+in the daily time series for temperature leads to a missing value for KBDI,
+which would then propagate to the next and all subsequent days. To avoid
+this, if the KBDI value for the previous day is missing, the function uses
+the most recent non-missing value from the previous 30 days. If no
+non-missing value is available, the maximum value of 203.2 is used.
+}

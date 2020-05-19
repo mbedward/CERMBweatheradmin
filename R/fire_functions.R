@@ -276,6 +276,12 @@ bom_db_update_fire <- function(db,
 #' format). The function is also used by \code{bom_db_update_fire} which sets the
 #' values of fire-related variables in the database tables.
 #'
+#' If there are missing days in the time series, dummy records will be added with all
+#' weather variables set to \code{NA}. This allows KBDI, drought factor and FFDI
+#' to be calculated for the rest of the time series. FFDI values for the dummy records
+#' will be set to \code{NA}. KBDI values (and resulting drought factor values) are set
+#' following the protocol described for \code{\link{bom_db_kbdi}}.
+#'
 #' @param dat A data frame with records for one or more weather stations.
 #'   Normally this will made up of records returned from querying the synoptic
 #'   or AWS tables in the database. If from another data source, the columns
@@ -362,17 +368,6 @@ bom_db_calculate_ffdi <- function(dat,
     dat.stn <- dat %>%
       dplyr::filter(station == the.stn)
 
-    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
-
-    if (!check$ok) {
-      gap.msg <- ""
-      if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
-      msg <- glue::glue("Problem with data for station {the.stn}
-                        {check$err}
-                        {gap.msg}")
-      stop(msg)
-    }
-
     .do_calculate_ffdi(dat.stn,
                        datatype,
                        av.rainfall,
@@ -415,10 +410,18 @@ bom_db_calculate_ffdi <- function(dat,
     # Treat missing rainfall values as zero (least worst option)
     dplyr::mutate(precipitation = .na2zero(precipitation))
 
+
+  # Add dummy records for any missing days. Dates of dummy records
+  # are returned as an attribute.
+  dat.stn <- add_missing_days(dat.stn)
+  dates.added <- attr(dat.stn, "dates.added", exact = TRUE)
+  attr(dat.stn, "dates.added") <- NULL
+
   # Tmax by calendar day
+  #
   dat.daily <- dat.stn %>%
     dplyr::group_by(year, month, day) %>%
-    dplyr::summarize(tmaxdaily = max(temperature, na.rm = TRUE)) %>%
+    dplyr::summarize(tmaxdaily = .max_with_na(temperature)) %>%
     dplyr::ungroup()
 
   # Add daily rainfall data
@@ -472,7 +475,7 @@ bom_db_calculate_ffdi <- function(dat,
   dat.stn <- dat.stn %>%
     dplyr::left_join(dat.daily, by = c("year", "month", "day")) %>%
 
-    # Add calculated FFDI values and return the data frame.
+    # Add calculated FFDI values.
     # Missing values in any of the input variables will propagate
     # through to FFDI.
     dplyr::mutate(ffdi = round(
@@ -481,6 +484,13 @@ bom_db_calculate_ffdi <- function(dat,
                 0.0234 * ..ffdi_wind.. -  # using standard colname set earlier
                 0.0345 * relhumidity),
       digits = 1))
+
+  # Remove any dummy records that were added for missing days
+  if (length(dates.added) > 0) {
+    ymd <- .date_to_ymd(dates.added)
+    dat.stn <- dat.stn %>%
+      dplyr::anti_join(ymd, by = c("year", "month", "day"))
+  }
 
   dat.stn %>%
     dplyr::select(station, year, month, day, hour, minute,
@@ -500,6 +510,15 @@ bom_db_calculate_ffdi <- function(dat,
 #' If a kbdi column is absent, or present but with all missing values,
 #' calculations will be performed for all records using the default
 #' initialization in which KBDI is set to its maximum value (203.2).
+#'
+#' Dealing with missing values: Nny missing daily precipitation values are set
+#' to zero and a message is issued, Missing daily temperature values are left
+#' as-is. The value of KBDI depends on the previous day's value. A missing value
+#' in the daily time series for temperature leads to a missing value for KBDI,
+#' which would then propagate to the next and all subsequent days. To avoid
+#' this, if the KBDI value for the previous day is missing, the function uses
+#' the most recent non-missing value from the previous 30 days. If no
+#' non-missing value is available, the maximum value of 203.2 is used.
 #'
 #' @param dat.daily A data frame of daily weather data. This should be for a
 #'   single weather station. If a 'station' column is present this will be
@@ -538,6 +557,11 @@ bom_db_kbdi <- function(dat.daily,
   if (!assume.order) {
     check <- bom_db_check_datetimes(dat.daily, daily = TRUE)[[1]]
     if (!check$ok) stop(check$err)
+  }
+
+  if (anyNA(dat.daily$precipdaily)) {
+    message("bom_db_kbdi: setting missing precipitation values to zero")
+    dat.daily$precipdaily <- .na2zero(dat.daily$precipdaily)
   }
 
   InputKBDI <- "kbdi" %in% colnames(dat.daily)
@@ -585,13 +609,16 @@ bom_db_kbdi <- function(dat.daily,
   start.rec <- max(3, start.rec)
 
   # Helper for KBDI loop below
-  clampK <- function(x) min(203.2, max(0, round(x, digits = 1)))
+  clampK <- function(x) {
+    ifelse(is.na(x), NA, min(203.2, max(0, round(x, digits = 1))))
+  }
 
   for (i in start.rec:Ndays) {
     Kprev <- Kday[i-1]
 
     if (is.na(Kprev)) {
-      # [Hamish] Missing Tmax or precip.eff values result in all subsequent
+      # [Hamish - comment from MATLAB code]
+      # Missing Tmax or precip.eff values result in all subsequent
       # ET and KBDI values being set to missing because of the lagged effect
       # of these variables. We need to specify when it is OK to ignore previous
       # missing values.
@@ -797,6 +824,8 @@ bom_db_drought <- function(dat.daily, assume.order = FALSE) {
 #' @export
 #'
 bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
+  if (anyNA(precipdaily)) stop("Missing values in input vector for daily precipitation")
+
   start.balance <- min(5, max(0, start.balance[1]))
 
   Ndays <- length(precipdaily)

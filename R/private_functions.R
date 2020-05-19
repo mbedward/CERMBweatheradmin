@@ -144,6 +144,49 @@
 }
 
 
+# Add records for any missing days in a time series data frame.
+.add_missing_days <- function(dat) {
+  .require_columns(dat, c("year", "month", "day", "hour", "minute"))
+
+  # If a station column is present there must be only one value
+  station <- NA
+  station.col <- match("station", tolower(colnames(dat)))
+  if (!is.na(station.col)) {
+    station <- unique(dat[, station.col])
+    if (length(station) != 1) {
+      stop("Data records should be for just one station")
+    }
+  }
+
+  dates <- unique(.ymd_to_date(dat$year, dat$month, dat$day))
+
+  dates <- setdiff(seq(min(dates), max(dates), by = "1 day"),
+                   dates)
+
+  if (length(dates) > 0) {
+    # setdiff gives a vector of days-since-epoch values instead
+    # of Date objects, so fix that
+    dates <- as.Date(dates, origin = "1970-01-01")
+
+    extras <- .date_to_ymd(dates)
+    extras$hour <- 0
+    extras$minute <- 0
+
+    if (!is.na(station)) extras$station <- station
+
+    dat <- dplyr::bind_rows(dat, extras)
+    attr(dat, "dates.added") <- dates
+
+  } else {
+    # No dates added. Set attribute to empty Date vector
+    attr(dat, "dates.added") <- as.Date(x = integer(0), origin = "1970-01-01")
+  }
+
+  dat
+}
+
+
+
 # Given a vector, check for a block of one or more missing values at the tail
 # and, if found, return the index for the first missing value in that block.
 # Return NA if no such block is present.
@@ -202,4 +245,14 @@
 # Convert NA values to zero
 .na2zero <- function(x) {
   ifelse(is.na(x), 0, x)
+}
+
+
+# Version of max that returns NA instead of -Inf if x is
+# empty or all values are NA
+.max_with_na <- function(x) {
+  # If all values are NA, return NA instead of -Inf
+  x <- na.omit(x)
+  if (length(x) == 0) NA
+  else max(x, na.rm = TRUE)
 }

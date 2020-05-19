@@ -56,6 +56,13 @@ weather data for one or more stations (see Arguments below for the required
 format). The function is also used by \code{bom_db_update_fire} which sets the
 values of fire-related variables in the database tables.
 }
+\details{
+If there are missing days in the time series, dummy records will be added with all
+weather variables set to \code{NA}. This allows KBDI, drought factor and FFDI
+to be calculated for the rest of the time series. FFDI values for the dummy records
+will be set to \code{NA}. KBDI values (and resulting drought factor values) are set
+following the protocol described for \code{\link{bom_db_kbdi}}.
+}
 \examples{
 \dontrun{
 library(CERMBweather)
