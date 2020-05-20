@@ -413,7 +413,7 @@ bom_db_calculate_ffdi <- function(dat,
 
   # Add dummy records for any missing days. Dates of dummy records
   # are returned as an attribute.
-  dat.stn <- add_missing_days(dat.stn)
+  dat.stn <- .add_missing_days(dat.stn)
   dates.added <- attr(dat.stn, "dates.added", exact = TRUE)
   attr(dat.stn, "dates.added") <- NULL
 
