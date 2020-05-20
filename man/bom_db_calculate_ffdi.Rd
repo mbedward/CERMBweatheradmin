@@ -49,19 +49,22 @@ A data frame with columns:
     values for temperature, wind speed and relative humidity.
 }
 \description{
-This function calculates FFDI (Forest Fire Danger Index)
-and the related variables: KBDI (Keetch-Bryam Drought Index) and Drought Factor.
-You can call it directly to calculate FFDI for an arbitrary data set of
-weather data for one or more stations (see Arguments below for the required
-format). The function is also used by \code{bom_db_update_fire} which sets the
-values of fire-related variables in the database tables.
+This function calculates FFDI (Forest Fire Danger Index) and the related
+variables: KBDI (Keetch-Bryam Drought Index) and Drought Factor. You can call
+it directly to calculate FFDI for an arbitrary data set of weather data for
+one or more stations (see Arguments below for the required format). The
+function is also used by \code{bom_db_update_fire} which sets the values of
+fire-related variables in the database tables.
 }
 \details{
-If there are missing days in the time series, dummy records will be added with all
-weather variables set to \code{NA}. This allows KBDI, drought factor and FFDI
-to be calculated for the rest of the time series. FFDI values for the dummy records
-will be set to \code{NA}. KBDI values (and resulting drought factor values) are set
-following the protocol described for \code{\link{bom_db_kbdi}}.
+If there are missing days in the time series, dummy records will be added
+with all weather variables set to \code{NA}. This allows KBDI, drought factor
+and FFDI to be calculated for the rest of the time series. FFDI values for
+the dummy records will be set to \code{NA}. KBDI values (and resulting
+drought factor values) are set following the protocol described for
+\code{\link{bom_db_kbdi}}. The records for each station must cover a period
+of at least 21 days for FFDI to be calculated, since Drought Factor requires
+an initial 20 days of daily rainfall data.
 }
 \examples{
 \dontrun{

@@ -10,6 +10,7 @@ bom_db_update_fire(
   records = c("new", "all"),
   stations = NULL,
   av.rainfall.method = c("metadata", "records"),
+  min.days.required = 30,
   quiet = FALSE
 )
 }
@@ -36,6 +37,12 @@ average rainfall values from the \code{STATIONS_METADATA} table; or
 'records' to calculate average rainfall from station records over the period
 2001 - 2015. With the latter option, any station that does not have data
 for the whole of the reference period will be ignored.}
+
+\item{min.days.required}{The minimum number of days of data required to
+perform calculations for a station. The default and smallest allowable
+value is 30 days. The number of days is determined by counting distict
+record dates. This does not consider gaps (missing days) in the time
+series.}
 
 \item{quiet}{If \code{TRUE}, do not print progress information (table and
 station names) to the console during processing. Default is \code{FALSE}.}

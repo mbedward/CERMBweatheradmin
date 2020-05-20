@@ -40,6 +40,12 @@
 #'   2001 - 2015. With the latter option, any station that does not have data
 #'   for the whole of the reference period will be ignored.
 #'
+#' @param min.days.required The minimum number of days of data required to
+#'   perform calculations for a station. The default and smallest allowable
+#'   value is 30 days. The number of days is determined by counting distict
+#'   record dates. This does not consider gaps (missing days) in the time
+#'   series.
+#'
 #' @param quiet If \code{TRUE}, do not print progress information (table and
 #'   station names) to the console during processing. Default is \code{FALSE}.
 #'
@@ -55,12 +61,18 @@ bom_db_update_fire <- function(db,
                                records = c("new", "all"),
                                stations = NULL,
                                av.rainfall.method = c("metadata", "records"),
+                               min.days.required = 30,
                                quiet = FALSE) {
   .ensure_connection(db)
 
   records <- match.arg(records)
 
   av.rainfall.method <- match.arg(av.rainfall.method)
+
+  if (min.days.required < 30) {
+    message("min.days.required reset to minimum valid value: 30")
+    min.days.required <- 30
+  }
 
   # Case-insensitive match for table names
   tables <- unique(match.arg(tolower(tables),
@@ -103,7 +115,8 @@ bom_db_update_fire <- function(db,
                             the.table,
                             the.station,
                             records,
-                            av.rainfall.method) {
+                            av.rainfall.method,
+                            min.days.required) {
 
   stopifnot(length(the.table) == 1,
             the.table %in% c("aws", "synoptic"))
@@ -122,6 +135,21 @@ bom_db_update_fire <- function(db,
 
   nrecs.updated <- 0
 
+  # Check number of days for station to see if it's worth doing
+  # FFDI calculations
+  cmd <- glue::glue("select count(*) as ndays from
+                       (select distinct year, month, day
+                        from {the.table}
+                        where station = {the.station});")
+
+  res <- pool::dbGetQuery(db, cmd)
+  if (res$ndays < 30) {
+    msg <- glue::glue("Skipping station {the.station}: \\
+                       only has data for {res$ndays} days")
+    warning(msg, immediate. = TRUE)
+    return(0)
+  }
+
   cmd <- glue::glue("select * from {the.table}
                     where station = {the.station}
                     order by year, month, day, hour, minute;")
@@ -136,14 +164,14 @@ bom_db_update_fire <- function(db,
     if (length(i)) {
       av.rainfall <- CERMBweather::STATION_METADATA$annualprecip_narclim[i]
       if (is.na(av.rainfall)) {
-        msg <- glue::glue("Skipping station {the.station}:
-                              missing rainfall value in STATION_METADATA")
+        msg <- glue::glue("Skipping station {the.station}: \\
+                           missing rainfall value in STATION_METADATA")
         warning(msg, immediate. = TRUE)
         return(0)
       }
     } else {
-      msg <- glue::glue("Skipping station {the.station}:
-                            not found in STATION_METADATA")
+      msg <- glue::glue("Skipping station {the.station}: \\
+                         not found in STATION_METADATA")
       warning(msg, immediate. = TRUE)
       return(0)
     }
@@ -159,7 +187,8 @@ bom_db_update_fire <- function(db,
 
     if (!all(AvRainfallYears %in% xcheck$year) ||
         !all(xcheck$ndays >= MinDaysPerYear)) {
-      msg <- glue::glue("Cannot calculate average annual rainfall for station {the.station}")
+      msg <- glue::glue("Skipping station {the.station}: \\
+                         cannot calculate average rainfall")
       message(msg)
       return(0)
     }
@@ -169,7 +198,7 @@ bom_db_update_fire <- function(db,
       bom_db_daily_rainfall(datatype = the.table, crop = TRUE, on.error = "null")
 
     if (is.null(xdat)) {
-      msg <- glue::glue("Interrupted time series for station {the.station}")
+      msg <- glue::glue("Skipping station {the.station}: interrupted time series")
       warning(msg)
       return(0)
     }
@@ -219,7 +248,10 @@ bom_db_update_fire <- function(db,
     }
   } else {  # records == "all"
     # Reset fire var values
-    dat <- dplyr::mutate(dat, kbdi = NA, drought = NA, ffdi = NA)
+    dat <- dplyr::mutate(dat,
+                         kbdi = NA_real_,
+                         drought = NA_real_,
+                         ffdi = NA_real_)
   }
 
   # Allow for calculation failing in the case of an interrupted time
@@ -269,18 +301,21 @@ bom_db_update_fire <- function(db,
 
 #' Calculate FFDI for a given data set.
 #'
-#' This function calculates FFDI (Forest Fire Danger Index)
-#' and the related variables: KBDI (Keetch-Bryam Drought Index) and Drought Factor.
-#' You can call it directly to calculate FFDI for an arbitrary data set of
-#' weather data for one or more stations (see Arguments below for the required
-#' format). The function is also used by \code{bom_db_update_fire} which sets the
-#' values of fire-related variables in the database tables.
+#' This function calculates FFDI (Forest Fire Danger Index) and the related
+#' variables: KBDI (Keetch-Bryam Drought Index) and Drought Factor. You can call
+#' it directly to calculate FFDI for an arbitrary data set of weather data for
+#' one or more stations (see Arguments below for the required format). The
+#' function is also used by \code{bom_db_update_fire} which sets the values of
+#' fire-related variables in the database tables.
 #'
-#' If there are missing days in the time series, dummy records will be added with all
-#' weather variables set to \code{NA}. This allows KBDI, drought factor and FFDI
-#' to be calculated for the rest of the time series. FFDI values for the dummy records
-#' will be set to \code{NA}. KBDI values (and resulting drought factor values) are set
-#' following the protocol described for \code{\link{bom_db_kbdi}}.
+#' If there are missing days in the time series, dummy records will be added
+#' with all weather variables set to \code{NA}. This allows KBDI, drought factor
+#' and FFDI to be calculated for the rest of the time series. FFDI values for
+#' the dummy records will be set to \code{NA}. KBDI values (and resulting
+#' drought factor values) are set following the protocol described for
+#' \code{\link{bom_db_kbdi}}. The records for each station must cover a period
+#' of at least 21 days for FFDI to be calculated, since Drought Factor requires
+#' an initial 20 days of daily rainfall data.
 #'
 #' @param dat A data frame with records for one or more weather stations.
 #'   Normally this will made up of records returned from querying the synoptic
@@ -401,6 +436,22 @@ bom_db_calculate_ffdi <- function(dat,
   # this function a bit easier.
   dat.stn <- dplyr::rename_at(dat.stn, windcol, ~"..ffdi_wind..")
 
+  # Check the time series is long enough for KBDI and drought
+  # calculations which need 20 prior days of rainfall data
+  dat.stn <- dat.stn %>%
+    dplyr::arrange(year, month, day, hour, minute)
+
+  d0 <- .ymd_to_date(dat.stn[1, c("year", "month", "day")])
+  d1 <- .ymd_to_date(dat.stn[nrow(dat.stn), c("year", "month", "day")])
+  ndays <- d1 - d0
+  if (ndays < 21) {
+    the.station <- dat.stn$station[1]
+    msg <- glue::glue(
+      "Records for station {the.station} span {ndays} days but \\
+       at least 21 days are required to calculate FFDI")
+    warning(msg, immediate. = TRUE)
+    return(NULL)
+  }
 
   dat.stn <- dat.stn %>%
     # Ensure only one record per time point (this will arbitrarily
@@ -432,8 +483,8 @@ bom_db_calculate_ffdi <- function(dat,
     )
 
   # Guard against a missing daily rainfall value which can arise
-  # if the aggregated daily rainfall series ends up being one day
-  # shorter than the station data
+  # when the last rain day's data did not include the full
+  # 09:01-09:00 period
   dat.daily$precipdaily <- .na2zero(dat.daily$precipdaily)
 
   # Ensure record order

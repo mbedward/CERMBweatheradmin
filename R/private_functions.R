@@ -121,10 +121,24 @@
 }
 
 
-# Convert integer year, month, day values to Date objects
+# Convert integer year, month, day values to Date objects.
+# If year is a data frame or matrix it is assumed to have columns
+# year, month and day. Otherwise three equal-length vectors are
+# expected.
 .ymd_to_date <- function(year, month, day) {
-  if(length(month) != length(year) || length(day) != length(year)) {
-    stop("year, month and day vectors must be the same length")
+  if (inherits(year, c("data.frame", "matrix"))) {
+    x <- year
+    colnames(x) <- tolower(colnames(x))
+    .require_columns(x, c("year", "month", "day"))
+
+    year <- x[, "year"]
+    month <- x[, "month"]
+    day <- x[, "day"]
+
+  } else if (inherits(year, "numeric")) {
+    if(length(month) != length(year) || length(day) != length(year)) {
+      stop("year, month and day vectors must be the same length")
+    }
   }
 
   as.Date( sprintf("%4d-%02d-%02d", year, month, day) )
