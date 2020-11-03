@@ -32,7 +32,7 @@ zip file. If FALSE, missing stations result in an error.}
 This function can read delimited text data, in the format used by the Bureau
 of Meteorology, from an individual weather station file or a directory or zip
 file containing one or more such files, stations in CSV format, and import
-them into a SQLite database. In the case of the input data source being a
+them into a connected database. In the case of the input data source being a
 directory or zip file, weather station files are identified by searching for
 names that include 'Data' followed by digits and underscores, with the file
 extension '.txt'. Any input records already present in the database are
@@ -43,7 +43,8 @@ FFDI) are \strong{not} calculated for the new records. call the function
 \examples{
 \dontrun{
 # Sometime earlier at start of session
-DB <- bom_db_init("c:/foo/bar/weather.db", readonly = FALSE)
+DB <- bom_db_open(drv = RSQLite::SQLite(),
+                  dbname = "c:/somewhere/my_weather.db")
 
 # Import data from a BOM zip file containing individuals CSV-format
 # data files for weather stations

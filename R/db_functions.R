@@ -3,7 +3,7 @@
 #' This function can read delimited text data, in the format used by the Bureau
 #' of Meteorology, from an individual weather station file or a directory or zip
 #' file containing one or more such files, stations in CSV format, and import
-#' them into a SQLite database. In the case of the input data source being a
+#' them into a connected database. In the case of the input data source being a
 #' directory or zip file, weather station files are identified by searching for
 #' names that include 'Data' followed by digits and underscores, with the file
 #' extension '.txt'. Any input records already present in the database are
@@ -36,7 +36,8 @@
 #' @examples
 #' \dontrun{
 #' # Sometime earlier at start of session
-#' DB <- bom_db_init("c:/foo/bar/weather.db", readonly = FALSE)
+#' DB <- bom_db_open(drv = RSQLite::SQLite(),
+#'                   dbname = "c:/somewhere/my_weather.db")
 #'
 #' # Import data from a BOM zip file containing individuals CSV-format
 #' # data files for weather stations
@@ -542,14 +543,16 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
     empty <- data.frame(station = NA_integer_, nrecs = 0)
   }
   else { # by == "total"
-    if (approx) sqltxt <- "SELECT MAX(ROWID) AS nrecs FROM {`tbl`}"
-    else sqltxt <- "SELECT COUNT(*) AS nrecs FROM {`tbl`}"
+    if (approx) command <-
+      "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
+    else command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
+
     empty <- data.frame(nrecs = 0)
   }
 
-  res <- lapply(c("AWS", "Synoptic"), function(tblname) {
-    sql <- glue::glue_sql(sqltxt, .con=db, tbl=tblname)
-    x <- DBI::dbGetQuery(db, sql)
+  res <- lapply(c("aws", "synoptic"), function(tblname) {
+    command <- glue::glue(command, tbl=tblname)
+    x <- DBI::dbGetQuery(db, command)
     if ( nrow(x) == 0 || is.na(x[["nrecs"]]) ) x <- empty
     x[["table"]] <- tblname
     x

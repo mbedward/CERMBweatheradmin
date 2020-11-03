@@ -376,7 +376,7 @@ bom_db_calculate_ffdi <- function(dat,
 
   colnames(dat) <- tolower(colnames(dat))
 
-  RequiredCols <- c("station", "year", "month", "day", "hour", "minute",
+  RequiredCols <- c("station", "datetime",
                     "precipitation", "temperature", "relhumidity")
 
   .require_columns(dat, RequiredCols)

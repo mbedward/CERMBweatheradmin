@@ -53,7 +53,10 @@
 
 # Selects and renames columns in a data frame of raw data.
 # Adds data type (aws or synoptic) and column types as attributes
-# of the returned data frame.
+# of the returned data frame. Date (year, month, day) and time
+# (hour, minute) columns are combined into a single timestamp column
+# (no time zone).
+#
 .map_fields <- function(dat) {
   type <- .get_bomdata_type(dat)
 
@@ -68,8 +71,20 @@
 
   dat <- dat[, ii.keep]
   colnames(dat) <- dbnames[ii.keep]
+
+
+  # Replace the separate date and time columns with
+  # a time stamp string (no time zone)
+  dat <- dat %>%
+    dplyr::mutate(timestamp = sprintf("%4d-%02d-%02d %02d:%02d",
+                                      year, month, day, hour, minute)) %>%
+    dplyr::select(station, timestamp, everything())
+
   attr(dat, "datatype") <- type
-  attr(dat, "coltypes") <- lookup[["coltype"]][ii.keep]
+
+  attr(dat, "coltypes") <- c("integer",
+                             "timestamp without time zone",
+                             rep("numeric", ncol(dat) - 2))
 
   dat
 }
