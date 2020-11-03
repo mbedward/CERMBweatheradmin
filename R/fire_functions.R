@@ -265,7 +265,7 @@ bom_db_update_fire <- function(db,
     warning(e$message, "\n", immediate. = TRUE)
   })
 
-  if (is.null(dat.ffdi)) return(0)
+  if (is.null(dat.ffdi) || nrow(dat.ffdi) == 0) return(0)
 
   # Update the source table
   #
