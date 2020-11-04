@@ -81,20 +81,35 @@ bom_db_import <- function(db,
 }
 
 
-# Helper function to create an SQL INSERT OR IGNORE statement
+# Helper function to create an SQL INSERT statement
 # for a given data frame. Assumes column names are standard and
 # the data frame has a 'datatype' attribute corresponding to a
 # table name.
 #
-.sql_import <- function(dat) {
+.sql_import <- function(dbtype, dat) {
   tblname <- attributes(dat)$datatype
 
   varnames <- paste(colnames(dat), collapse = ", ")
-  params <- paste(paste0(":", colnames(dat)), collapse = ", ")
 
-  cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
-                    ({varnames})
-                    VALUES ({params});")
+  if (dbtype == "sqlite") {
+    params <- paste(paste0(":", colnames(dat)), collapse = ", ")
+
+    cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
+                      ({varnames})
+                      VALUES ({params});")
+
+  } else if (dbtype == "postgresql") {
+    params <- paste(paste0("$", 1:ncol(dat)), collapse = ", ")
+
+    cmd <- glue::glue("INSERT INTO {tblname}
+                      ({varnames})
+                      VALUES ({params})
+                      ON CONFLICT DO NOTHING;")
+  } else {
+    # Should not be here
+    stop("Unknown database type: ", dbtype)
+  }
+
   cmd
 }
 
@@ -119,10 +134,22 @@ bom_db_import <- function(db,
   pool::poolWithTransaction(
     db,
     function(conn) {
+      dbtype <- .get_db_type(db)
       for (dat in dats) {
-        rs <- DBI::dbSendStatement(conn, .sql_import(dat))
-        DBI::dbBind(rs, params = dat)
-        DBI::dbClearResult(rs)
+        if (dbtype == "sqlite") {
+          # SQLite imports are done with a parameterized insert query
+          cmd <- .sql_import(dbtype, dat)
+          rs <- DBI::dbSendStatement(conn, cmd)
+          DBI::dbBind(rs, params = dat)
+          DBI::dbClearResult(rs)
+
+        } else if (dbtype == "postgresql") {
+          # PostgreSQL imports (usually to a remote server) are done
+          # using dbWriteTable because this is much, much faster than
+          # doing an insert query
+          tablename <- attr(dat, "datatype", exact = TRUE)
+          DBI::dbWriteTable(conn, tablename, dat, append = TRUE)
+        }
       }
     }
   )
@@ -148,11 +175,12 @@ bom_db_import <- function(db,
     pool::poolWithTransaction(
       db,
       function(conn) {
+        dbtype <- .get_db_type(db)
 
         for (i in 1:nrow(info)) {
           if (info[[i, "filesize"]] > 0) {
             filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
-            .do_import_file_via_connection(conn, filepath)
+            .do_import_file_via_connection(conn, dbtype, filepath)
           }
         }
       }
@@ -166,9 +194,11 @@ bom_db_import <- function(db,
 # a transaction.
 #
 .do_import_file_via_pool <- function(dbpool, filepath) {
+  dbtype <- .get_db_type(dbpool)
+
   pool::poolWithTransaction(
     dbpool,
-    function(conn) .do_import_file_via_connection(conn, filepath)
+    function(conn) .do_import_file_via_connection(conn, dbtype, filepath)
   )
 }
 
@@ -176,7 +206,7 @@ bom_db_import <- function(db,
 # Helper function to import an individual CSV-format data file.
 # Uses a database connection object directly.
 #
-.do_import_file_via_connection <- function(conn, filepath) {
+.do_import_file_via_connection <- function(conn, dbtype, filepath) {
   dat <- try(read.csv(filepath, stringsAsFactors = FALSE), silent=TRUE)
 
   if (inherits(dat, "try-error")) FALSE
@@ -201,7 +231,13 @@ bom_db_import <- function(db,
       }
     )
 
-    rs <- DBI::dbSendStatement(conn, .sql_import(dat))
+    cmd <- .sql_import(dbtype, dat)
+    rs <- DBI::dbSendStatement(conn, cmd)
+
+    # RPostgres does not like column names whereas RSQLite
+    # uses them (sigh...)
+    if (dbtype == "postgresql") dat <- unname(dat)
+
     DBI::dbBind(rs, params = dat)
     DBI::dbClearResult(rs)
 

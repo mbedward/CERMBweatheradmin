@@ -51,6 +51,26 @@
 }
 
 
+# Determine if the database connection is SQLite or PostgreSQL
+# and issue an error if it is anything else.
+.get_db_type <- function(db) {
+  con.type <- pool::dbGetInfo(db)$pooledObjectClass
+  con.type <- tolower(con.type)
+  con.type <- stringr::str_trim(con.type)
+
+  if (con.type == "sqliteconnection") {
+    "sqlite"
+  } else if (con.type == "pqconnection") {
+    "postgresql"
+  } else if (con.type == "postgresqlconnection") {
+    stop("RPostgreSQL package connections are not supported.\n",
+         "Use the RPostgres package instead.")
+  } else {
+    stop("Unsupported connection type: ", con.type)
+  }
+}
+
+
 # Selects and renames columns in a data frame of raw data.
 # Adds data type (aws or synoptic) and column types as attributes
 # of the returned data frame. Date (year, month, day) and time
@@ -76,15 +96,18 @@
   # Replace the separate date and time columns with
   # a time stamp string (no time zone)
   dat <- dat %>%
-    dplyr::mutate(timestamp = sprintf("%4d-%02d-%02d %02d:%02d",
-                                      year, month, day, hour, minute)) %>%
-    dplyr::select(station, timestamp, everything())
+    dplyr::mutate(datetime = sprintf("%4d-%02d-%02d %02d:%02d",
+                                     year, month, day, hour, minute)) %>%
+
+    dplyr::select(-month, -day, -hour, -minute) %>%
+    dplyr::select(station, datetime, year, everything())
 
   attr(dat, "datatype") <- type
 
   attr(dat, "coltypes") <- c("integer",
                              "timestamp without time zone",
-                             rep("numeric", ncol(dat) - 2))
+                             "integer",
+                             rep("numeric", ncol(dat) - 3))
 
   dat
 }
