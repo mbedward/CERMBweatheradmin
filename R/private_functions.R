@@ -109,6 +109,18 @@
                              "integer",
                              rep("numeric", ncol(dat) - 3))
 
+  # For some reason, a numeric column will be read as boolean
+  # if all values were missing.
+  for (i in 4:ncol(dat)) {
+    if (is.logical(dat[[i]])) {
+      # Double check that all values are missing
+      if (!all(is.na(dat[[i]]))) {
+        stop("Found boolean column but expected numeric values")
+      }
+      dat[[i]] <- as.numeric(dat[[i]])
+    }
+  }
+
   dat
 }
 

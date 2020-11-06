@@ -81,36 +81,81 @@ bom_db_import <- function(db,
 }
 
 
-# Helper function to create an SQL INSERT statement
-# for a given data frame. Assumes column names are standard and
-# the data frame has a 'datatype' attribute corresponding to a
-# table name.
+# Function to import new records into a SQLite database
+# via a parameterized query that takes advantage of
+# SQLite's parameter name matching and 'insert or ignore'
+# syntax.
 #
-.sql_import <- function(dbtype, dat) {
+.do_sqlite_import <- function(db, dat) {
+  stopifnot(.get_db_type(db) == "sqlite")
+
   tblname <- attributes(dat)$datatype
 
   varnames <- paste(colnames(dat), collapse = ", ")
 
-  if (dbtype == "sqlite") {
-    params <- paste(paste0(":", colnames(dat)), collapse = ", ")
+  params <- paste(paste0(":", colnames(dat)), collapse = ", ")
 
-    cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
+  cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
                       ({varnames})
                       VALUES ({params});")
 
-  } else if (dbtype == "postgresql") {
-    params <- paste(paste0("$", 1:ncol(dat)), collapse = ", ")
+  pool::poolWithTransaction(
+    db,
+    function(conn) {
+      rs <- DBI::dbSendStatement(conn, cmd)
+      DBI::dbBind(rs, params = dat)
+      DBI::dbClearResult(rs)
+    }
+  )
+}
 
-    cmd <- glue::glue("INSERT INTO {tblname}
-                      ({varnames})
-                      VALUES ({params})
-                      ON CONFLICT DO NOTHING;")
-  } else {
-    # Should not be here
-    stop("Unknown database type: ", dbtype)
-  }
 
-  cmd
+.do_postgresql_import <- function(db, dat) {
+  stopifnot(.get_db_type(db) == "postgresql")
+
+  maintbl.name <- attr(dat, "datatype", exact = TRUE)
+  stopifnot(maintbl.name %in% c("aws", "synoptic"))
+
+  temptbl.name <- paste0(maintbl.name, "_temp")
+
+  sql.create_temp_table <- glue::glue(
+    "CREATE TEMPORARY TABLE {temptbl.name}
+     ON COMMIT DROP
+     AS
+     SELECT * FROM {maintbl.name}
+     WITH NO DATA;")
+
+  varnames <- colnames(dat)
+  ii <- grepl("datetime", varnames, ignore.case = TRUE)
+  if (!sum(ii) == 1) stop("Expected one 'datetime' column")
+
+  temp.varnames <- varnames
+
+  # Need a type cast to transfer the text timestamps from the
+  # temporary table into the datetime column of the main table
+  temp.varnames[ii] <- "datetime::timestamp without time zone"
+
+  sql.insert_recs <- glue::glue(
+    "INSERT INTO {maintbl.name} (
+      {paste(varnames, collapse = ', ')}
+    )
+    (SELECT {paste(temp.varnames, collapse = ', ')}
+     FROM {temptbl.name})
+    ON CONFLICT DO NOTHING;"
+  )
+
+  sql.drop_temp_table <- glue::glue(
+    "DROP TABLE {temptbl.name};"
+  )
+
+  pool::poolWithTransaction(db, function(conn) {
+    DBI::dbExecute(conn, sql.create_temp_table)
+
+    DBI::dbWriteTable(conn, temptbl.name, dat, overwrite = TRUE)
+    DBI::dbExecute(conn, sql.insert_recs)
+
+    DBI::dbExecute(conn, sql.drop_temp_table)
+  })
 }
 
 
@@ -131,28 +176,16 @@ bom_db_import <- function(db,
 
   dats <- bom_zip_data(zipfile, stations, allow.missing)
 
-  pool::poolWithTransaction(
-    db,
-    function(conn) {
-      dbtype <- .get_db_type(db)
-      for (dat in dats) {
-        if (dbtype == "sqlite") {
-          # SQLite imports are done with a parameterized insert query
-          cmd <- .sql_import(dbtype, dat)
-          rs <- DBI::dbSendStatement(conn, cmd)
-          DBI::dbBind(rs, params = dat)
-          DBI::dbClearResult(rs)
-
-        } else if (dbtype == "postgresql") {
-          # PostgreSQL imports (usually to a remote server) are done
-          # using dbWriteTable because this is much, much faster than
-          # doing an insert query
-          tablename <- attr(dat, "datatype", exact = TRUE)
-          DBI::dbWriteTable(conn, tablename, dat, append = TRUE)
-        }
-      }
+  dbtype <- .get_db_type(db)
+  if (dbtype == "sqlite") {
+    for (dat in dats) {
+      .do_sqlite_import(db, dat)
     }
-  )
+  } else if (dbtype == "postgresql") {
+    for (dat in dats) {
+      .do_postgresql_import(db, dat)
+    }
+  }
 }
 
 
@@ -281,9 +314,9 @@ bom_db_import <- function(db,
 bom_db_create <- function(dbpath) {
   if (file.exists(dbpath)) stop("File already exists: ", dbpath)
 
-  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
+  db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
 
-  pool::poolWithTransaction(DB, function(conn) {
+  pool::poolWithTransaction(db, function(conn) {
     DBI::dbExecute(conn, SQL_CREATE_TABLES$create_synoptic_table)
     DBI::dbExecute(conn, SQL_CREATE_TABLES$create_aws_table)
     DBI::dbExecute(conn, SQL_CREATE_TABLES$create_stations_table)
@@ -291,7 +324,7 @@ bom_db_create <- function(dbpath) {
     DBI::dbWriteTable(conn, "Stations", CERMBweather::STATION_METADATA, append = TRUE)
   })
 
-  DB
+  db
 }
 
 #' Open a connection to an existing database
@@ -332,16 +365,16 @@ bom_db_open <- function(dbpath, readonly = TRUE) {
   if (dir.exists(dbpath)) stop("Expected a file not a directory: ", dbpath)
 
   # Initially open as read-write for checking tables
-  DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RW)
-  .ensure_connection(DB)
-  .ensure_stations_table(DB)
+  db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RW)
+  .ensure_connection(db)
+  .ensure_stations_table(db)
 
   if (readonly) {
-    bom_db_close(DB)
-    DB <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RO)
+    bom_db_close(db)
+    db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RO)
   }
 
-  DB
+  db
 }
 
 
