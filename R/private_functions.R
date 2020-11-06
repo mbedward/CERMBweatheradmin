@@ -104,21 +104,25 @@
 
   attr(dat, "datatype") <- type
 
-  attr(dat, "coltypes") <- c("integer",
-                             "timestamp without time zone",
-                             "integer",
-                             rep("numeric", ncol(dat) - 3))
+  coltypes <- c("integer",
+                "timestamp without time zone",
+                "integer",
+                rep("numeric", ncol(dat) - 3))
 
-  # For some reason, a numeric column will be read as boolean
-  # if all values were missing.
-  for (i in 4:ncol(dat)) {
-    if (is.logical(dat[[i]])) {
-      # Double check that all values are missing
-      if (!all(is.na(dat[[i]]))) {
-        stop("Found boolean column but expected numeric values")
+  attr(dat, "coltypes") <- coltypes
+
+  # Sometimes there are non-numeric values in the measure fields
+  # (e.g. whitespace or '###'). Guard against this by converting
+  # each measure field to numeric. Non-numeric values will be
+  # coerced to NA.
+  for (i in 4:length(coltypes)) {
+    suppressWarnings(
+      if (coltypes[i] == "numeric") {
+        if (!is.numeric(dat[[i]])) {
+          dat[[i]] <- as.numeric(dat[[i]])
+        }
       }
-      dat[[i]] <- as.numeric(dat[[i]])
-    }
+    )
   }
 
   dat
