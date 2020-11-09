@@ -5,7 +5,7 @@
 \alias{COLUMN_LOOKUP}
 \title{Lookup table for station data fields}
 \format{
-An object of class \code{data.frame} with 49 rows and 4 columns.
+An object of class \code{data.frame} with 49 rows and 5 columns.
 }
 \usage{
 COLUMN_LOOKUP

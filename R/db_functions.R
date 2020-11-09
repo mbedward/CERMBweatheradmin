@@ -126,14 +126,14 @@ bom_db_import <- function(db,
      WITH NO DATA;")
 
   varnames <- colnames(dat)
-  ii <- grepl("datetime", varnames, ignore.case = TRUE)
-  if (!sum(ii) == 1) stop("Expected one 'datetime' column")
+  ii <- grepl("date_[a-z]+", varnames, ignore.case = TRUE)
+  if (!sum(ii) == 2) stop("Expected two date columns")
 
   temp.varnames <- varnames
 
-  # Need a type cast to transfer the text timestamps from the
-  # temporary table into the datetime column of the main table
-  temp.varnames[ii] <- "datetime::timestamp without time zone"
+  # Need a type cast to transfer the text dates from the
+  # temporary table into the date column of the main table
+  temp.varnames[ii] <- paste0(temp.varnames[ii], "::date")
 
   sql.insert_recs <- glue::glue(
     "INSERT INTO {maintbl.name} (

@@ -73,9 +73,11 @@
 
 # Selects and renames columns in a data frame of raw data.
 # Adds data type (aws or synoptic) and column types as attributes
-# of the returned data frame. Date (year, month, day) and time
-# (hour, minute) columns are combined into a single timestamp column
-# (no time zone).
+# of the returned data frame.
+#
+# Columns: year, month, day are combined into a 'date' column.
+# Hour and minute columns are kept separate and no time zone information
+# is assigned.
 #
 .map_fields <- function(dat) {
   type <- .get_bomdata_type(dat)
@@ -86,28 +88,30 @@
   ii <- match(cnames, lookupnames)
   if (anyNA(ii)) stop("Unrecognized column name(s): ", colnames(dat)[is.na(ii)])
 
-  dbnames <- lookup[["db"]][ii]
-  ii.keep <- !is.na(dbnames)
+  importnames <- lookup[["importcolname"]][ii]
+  ii.keep <- !is.na(importnames)
 
   dat <- dat[, ii.keep]
-  colnames(dat) <- dbnames[ii.keep]
+  colnames(dat) <- importnames[ii.keep]
 
 
-  # Replace the separate date and time columns with
-  # a time stamp string (no time zone)
+  # Combine the separate year, month, day columns for local and standard
+  # time into two date columns.
   dat <- dat %>%
-    dplyr::mutate(datetime = sprintf("%4d-%02d-%02d %02d:%02d",
-                                     year, month, day, hour, minute)) %>%
+    dplyr::mutate(date_local = sprintf("%4d-%02d-%02d",
+                                       year_local, month_local, day_local),
+                  date_std = sprintf("%4d-%02d-%02d",
+                                     year_std, month_std, day_std))
 
-    dplyr::select(-month, -day, -hour, -minute) %>%
-    dplyr::select(station, datetime, year, everything())
+  dat <- dat[, na.omit(lookup$dbcolname)]
 
   attr(dat, "datatype") <- type
 
-  coltypes <- c("integer",
-                "timestamp without time zone",
-                "integer",
-                rep("numeric", ncol(dat) - 3))
+  coltypes <- sapply(colnames(dat), function(cn) {
+    i <- match(cn, lookup[["dbcolname"]])
+    if (is.na(i)) stop("Data column name missing from lookup table: ", cn)
+    lookup[["dbcoltype"]][i]
+  })
 
   attr(dat, "coltypes") <- coltypes
 
