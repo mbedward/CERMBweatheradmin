@@ -67,9 +67,6 @@ bom_db_import <- function(db,
 
   .ensure_connection(db)
 
-  # Initial record count for each table
-  Nrecs.init <- bom_db_summary(db, by = "total")
-
   if (.is_zip_file(datapath))
     .do_import_zip(db, datapath, stations, allow.missing)
 
@@ -77,7 +74,7 @@ bom_db_import <- function(db,
     .do_import_dir(db, datapath, stations, allow.missing)
 
   else
-    .do_import_file_via_pool(db, datapath)
+    .do_import_file(db, datapath)
 }
 
 
@@ -199,80 +196,40 @@ bom_db_import <- function(db,
 
   info <- bom_dir_summary(dirpath)
 
-  if (is.null(stations)) stations <- info[["station"]]
-
-  ids <- bom_station_id(stations)
-  info <- dplyr::filter(info, station %in% ids)
+  if (!is.null(stations)) {
+    ids <- bom_station_id(stations)
+    info <- dplyr::filter(info, station %in% ids)
+  }
 
   if (nrow(info) > 0) {
-    pool::poolWithTransaction(
-      db,
-      function(conn) {
-        dbtype <- .get_db_type(db)
-
-        for (i in 1:nrow(info)) {
-          if (info[[i, "filesize"]] > 0) {
-            filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
-            .do_import_file_via_connection(conn, dbtype, filepath)
-          }
-        }
+    for (i in 1:nrow(info)) {
+      if (info[[i, "filesize"]] > 0) {
+        filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
+        .do_import_file(db, filepath)
       }
-    )
+    }
   }
 }
 
 
 # Helper function to import an individual CSV-format data file.
-# Uses a database connection pool object and wraps the insert in
-# a transaction.
 #
-.do_import_file_via_pool <- function(dbpool, filepath) {
-  dbtype <- .get_db_type(dbpool)
-
-  pool::poolWithTransaction(
-    dbpool,
-    function(conn) .do_import_file_via_connection(conn, dbtype, filepath)
-  )
-}
-
-
-# Helper function to import an individual CSV-format data file.
-# Uses a database connection object directly.
-#
-.do_import_file_via_connection <- function(conn, dbtype, filepath) {
+.do_import_file <- function(db, filepath) {
   dat <- try(read.csv(filepath, stringsAsFactors = FALSE), silent=TRUE)
 
-  if (inherits(dat, "try-error")) FALSE
+  if (inherits(dat, "try-error")) {
+    FALSE
+  }
   else {
     dat <- .map_fields(dat)
 
-    # Ensure we have integer or numeric data in each column
-    # (some BOM data sets have empty values as character strings)
-    coltypes <- attributes(dat)$coltypes
-    stopifnot(length(coltypes) == ncol(dat))
+    dbtype <- .get_db_type(db)
 
-    suppressWarnings(
-      for (i in 1:ncol(dat)) {
-        if (coltypes[i] == "integer") {
-          dat[[i]] <- as.integer(dat[[i]])
-        } else if (coltypes[i] == "numeric") {
-          dat[[i]] <- as.numeric(dat[[i]])
-        } else {
-          # This would be a package programming error
-          stop("Unknown column type in COLUMN_LOOKUP: ", coltypes[i])
-        }
-      }
-    )
-
-    cmd <- .sql_import(dbtype, dat)
-    rs <- DBI::dbSendStatement(conn, cmd)
-
-    # RPostgres does not like column names whereas RSQLite
-    # uses them (sigh...)
-    if (dbtype == "postgresql") dat <- unname(dat)
-
-    DBI::dbBind(rs, params = dat)
-    DBI::dbClearResult(rs)
+    if (dbtype == "sqlite") {
+      .do_sqlite_import(db, dat)
+    } else if (dbtype == "postgresql") {
+      .do_postgresql_import(db, dat)
+    }
 
     TRUE
   }
@@ -613,7 +570,7 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
   }
   else { # by == "total"
     if (approx) command <-
-      "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
+        "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
     else command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
 
     empty <- data.frame(nrecs = 0)
