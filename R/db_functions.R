@@ -1,18 +1,19 @@
 #' Import BOM weather station data into a database
 #'
 #' This function can read delimited text data, in the format used by the Bureau
-#' of Meteorology, from an individual weather station file or a directory or zip
-#' file containing one or more such files, stations in CSV format, and import
-#' them into a connected database. In the case of the input data source being a
+#' of Meteorology, from an individual weather station file, or from a directory
+#' or zip file containing one or more such files in CSV format, and import them
+#' into a connected database. In the case of the input data source being a
 #' directory or zip file, weather station files are identified by searching for
 #' names that include 'Data' followed by digits and underscores, with the file
-#' extension '.txt'. Any input records already present in the database are
-#' silently ignored. Note that fire-related variables (KBDI, drought factor and
-#' FFDI) are \strong{not} calculated for the new records. call the function
-#' \code{bom_db_update_fire} to do this.
+#' extension '.txt'. Any records that are duplicate those already in the
+#' database are silently ignored. Note that fire-related variables (KBDI,
+#' drought factor and FFDI) are \strong{not} calculated for the new records.
+#' call the function \code{bom_db_update_fire} to do this.
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param db A database connection pool object created directly by the user (see
+#'   examples) or returned by \code{\link{bom_db_open}} or
+#'   \code{\link{bom_db_create}}.
 #'
 #' @param datapath Character path to one of the following: an individual weather
 #'   station data file in CSV format; a directory containing one or more data
@@ -21,6 +22,7 @@
 #'
 #' @param stations Either NULL (default) to import data for all stations, or a
 #'   character vector of station identifiers. Ignored if \code{datapath} is a
+#'   single file.
 #'
 #' @param allow.missing If TRUE (default) and specific stations were requested,
 #'   the function will silently ignore any that are missing in the directory or
@@ -35,7 +37,7 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Sometime earlier at start of session
+#' # Connect to a PostgreSQL database
 #' DB <- bom_db_open(drv = RSQLite::SQLite(),
 #'                   dbname = "c:/somewhere/my_weather.db")
 #'
@@ -236,11 +238,11 @@ bom_db_import <- function(db,
 }
 
 
-#' Create a new database for weather data
+#' Create a new SQLite database for weather data
 #'
-#' This function creates a new database with tables: 'Synoptic' for synoptic
-#' data records; 'AWS' for automatic weather station data records; and
-#' 'Stations' with details of station names and locations. SQLite databases
+#' This function creates a new database with tables: 'synoptic' for synoptic
+#' data records; 'aws' for automatic weather station data records; and
+#' 'stations' with details of station names and locations. SQLite databases
 #' consist of a single file which holds all tables. The file extension is
 #' arbitrary and may be omitted, but using '.db' or '.sqlite' is recommended for
 #' sanity.
@@ -257,18 +259,18 @@ bom_db_import <- function(db,
 #'
 #' @examples
 #' \dontrun{
-#' # Create a new database file with the required weather data tables
+#' # Create a new SQLite database with the required weather data tables
 #' # for AWS and synoptic data and weather station metadata
-#' DB <- bom_db_create("c:/foo/bar/weather.db")
+#' DB <- bom_db_create_sqlite("c:/foo/bar/weather.db")
 #'
 #' # Do things with it
-#' bom_db_import(DB, "c:/foo/bar/update_aws.zip")
+#' bom_db_import(DB, "c:/foo/bar/some_bom_data.zip")
 #'
-#' # At end of session
-#' bom_db_close(DB)
+#' # Close the connection object at the end of the session
+#' pool::poolClose(DB)
 #' }
 
-bom_db_create <- function(dbpath) {
+bom_db_create_sqlite <- function(dbpath) {
   if (file.exists(dbpath)) stop("File already exists: ", dbpath)
 
   db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
@@ -284,175 +286,13 @@ bom_db_create <- function(dbpath) {
   db
 }
 
-#' Open a connection to an existing database
-#'
-#' This function connects an existing database and checks that it contains the
-#' required tables for synoptic and AWS data. If a 'Stations' table is not present
-#' in the database, it is added. By default, a read-only connection is returned.
-#'
-#' @param dbpath A character path to an existing database file.
-#'
-#' @param readonly If TRUE (default) a read-only connection is returned that
-#'   you can use to query the database but not to import new data. If
-#'   FALSE, a read-write connection is returned that can be used with
-#'   \code{\link{bom_db_import}}.
-#'
-#' @return A database connection pool object that can be used with other package
-#'   functions such as \code{\link{bom_db_import}} as well as with \code{dplyr}
-#'   functions. It should be closed at the end of a session with
-#'   \code{\link{bom_db_close}}.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' # Open a database
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
-#'
-#' # Do things with it
-#' bom_db_import(DB, "c:/foo/updates/some_aws.zip")
-#'
-#' # At end of session
-#' bom_db_close(DB)
-#' }
-#'
-bom_db_open <- function(dbpath, readonly = TRUE) {
-  if (!file.exists(dbpath)) stop("File not found: ", dbpath)
-
-  if (dir.exists(dbpath)) stop("Expected a file not a directory: ", dbpath)
-
-  # Initially open as read-write for checking tables
-  db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RW)
-  .ensure_connection(db)
-  .ensure_stations_table(db)
-
-  if (readonly) {
-    bom_db_close(db)
-    db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RO)
-  }
-
-  db
-}
-
-
-#' Close a connection to a database
-#'
-#' Given a database connection pool object, as returned by
-#' \code{\link{bom_db_create}} or \code{\link{bom_db_open}}, this function
-#' checks whether the connection is open and, if so, closes it. After being
-#' closed, the connection object can no longer be used.
-#'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
-#'
-#' @return Invisibly returns TRUE if the connection was closed, or FALSE
-#'   otherwise (e.g. the connection had been closed previously).
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
-#'
-#' # do things with the database, then...
-#'
-#' bom_db_close(DB)
-#' }
-#'
-bom_db_close <- function(db) {
-  res <- FALSE
-
-  if (.is_open_connection(db)) {
-    pool::poolClose(db)
-    res <- TRUE
-  }
-
-  invisible(res)
-}
-
-
-#' Check if a database connection is read-only
-#'
-#' Checks if the given database connection is read-only, ie. can be used to
-#' retrieve data but not import new data. An error is issued if \code{db}
-#' is not a currently open connection to a weather database.
-#'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
-#'
-#' @return TRUE if the connection is read-only; or FALSE if it supports write
-#'   operations.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
-#'
-#' # This will return TRUE
-#' bom_db_readonly(DB)
-#'
-#' # Re-open connection with write permission
-#' bom_db_close(DB)
-#' DB <- bom_db_open("c:/foo/bar/weather.db", readonly = FALSE)
-#'
-#' # Now this will return FALSE
-#' bom_db_readonly(DB)
-#' }
-#'
-bom_db_readonly <- function(db) {
-  .ensure_connection(db)
-
-  con <- pool::poolCheckout(db)
-  flags <- con@flags
-  pool::poolReturn(con)
-
-  bitwAnd(flags, RSQLite::SQLITE_RO) > 0
-}
-
-
-#' Check if a database connection supports read and write operations
-#'
-#' Checks if the given database connection can be used for write operations
-#' (importing new data) as well as read operations (querying and retrieving
-#' data). An error is issued if \code{db} is not a currently open connection to
-#' a weather database.
-#'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
-#'
-#' @return TRUE if the connection supports write operations; or FALSE if it is
-#'   read-only.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
-#'
-#' # This will return FALSE
-#' bom_db_readwrite(DB)
-#'
-#' # Re-open connection with write permission
-#' bom_db_close(DB)
-#' DB <- bom_db_open("c:/foo/bar/weather.db", readonly = FALSE)
-#'
-#' # Now this will return TRUE
-#' bom_db_readwrite(DB)
-#' }
-#'
-bom_db_readwrite <- function(db) {
-  !bom_db_readonly(db)
-}
-
 
 #' Gets a \code{tbl} object for AWS data to use with dplyr functions
 #'
 #' This function takes an open connection to a database and returns a dplyr
 #' \code{tbl} object for AWS data to use with dplyr functions.
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param db A database connection pool object.
 #'
 #' @return A \code{tbl} object representing the AWS table to use with dplyr.
 #'
@@ -460,11 +300,19 @@ bom_db_readwrite <- function(db) {
 #'
 #' @examples
 #' \dontrun{
-#' # Connect to a database
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#' # Connect to a SQLite database...
+#' DB <- pool::dbPool(RSQLite::SQLite(),
+#'                    dbname = "c:/foo/bar/weather.db")
+#'
+#' # ...or to a PostgreSQL database
+#' DB <- pool::dbPool(RPostgreSQL::PostgreSQL(),
+#'                    dbname = "some_database",
+#'                    host = "localhost",
+#'                    user = "username",
+#'                    password = "mypassword")
 #'
 #' # Get a tbl object for AWS data
-#' taws <- bom_db_aws(db)
+#' taws <- bom_db_aws(DB)
 #'
 #' # Get the field names in the table
 #' colnames(taws)
@@ -496,8 +344,7 @@ bom_db_aws <- function(db) {
 #' This function takes an open connection to a database and returns a dplyr
 #' \code{tbl} object for synoptic data to use with dplyr functions.
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param db A database connection pool object.
 #'
 #' @return A \code{tbl} object representing the synoptic table to use with
 #'   dplyr.
@@ -506,11 +353,19 @@ bom_db_aws <- function(db) {
 #'
 #' @examples
 #' \dontrun{
-#' # Connect to a database
-#' DB <- bom_db_open("c:/foo/bar/weather.db")
+#' # Connect to a SQLite database...
+#' DB <- pool::dbPool(RSQLite::SQLite(),
+#'                    dbname = "c:/foo/bar/weather.db")
+#'
+#' # ...or to a PostgreSQL database
+#' DB <- pool::dbPool(RPostgreSQL::PostgreSQL(),
+#'                    dbname = "some_database",
+#'                    host = "localhost",
+#'                    user = "username",
+#'                    password = "mypassword")
 #'
 #' # Get a tbl object for AWS data
-#' tsynoptic <- bom_db_aws(db)
+#' tsynoptic <- bom_db_aws(DB)
 #'
 #' # Get the field names in the table
 #' colnames(tsynoptic)
@@ -539,7 +394,11 @@ bom_db_synoptic <- function(db) {
 
 #' Gets a summary of database contents
 #'
-#' Gets the count of database records in the AWS and Synoptic tables.
+#' Gets the count of database records in the AWS and Synoptic tables. It can
+#' take forever to get an exact count of records, especially from a PostgreSQL
+#' database. Setting the \code{approx} argument to \code{TRUE} (default) will
+#' return a very fast, approximate total count. This argument is ignored if the
+#' function is called with \code{by = "station"}.
 #'
 #' @param db A database connection pool object as returned by
 #'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
@@ -548,11 +407,10 @@ bom_db_synoptic <- function(db) {
 #'   count of records by weather station.
 #'
 #' @param approx If TRUE (default) and \code{by == "total"} return an
-#'   approximate record count based on the maximum RowID for each table. This is
-#'   almost instant whereas a full record count is very slow (minutes rather
-#'   than seconds) for large tables. However, it is approximate because RowID is
-#'   an automatically incremented variable that does not account for any
-#'   previously deleted records. Ignored when \code{by == "station"}.
+#'   approximate record count. This is almost instant whereas a full record
+#'   count is very slow (minutes rather than seconds) for large tables. However,
+#'   it is only approximate and might not reflect recent additions or deletions.
+#'   Ignored when \code{by == "station"}.
 #'
 #' @return A data frame with columns: table; station (if argument 'by' was
 #'   'station'); nrecs.
@@ -564,15 +422,28 @@ bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
 
   .ensure_connection(db)
 
-  if (by == "station") {
-    sqltxt <- "SELECT station, COUNT(*) AS nrecs FROM {`tbl`} GROUP BY station"
-    empty <- data.frame(station = NA_integer_, nrecs = 0)
-  }
-  else { # by == "total"
-    if (approx) command <-
-        "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
-    else command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
+  dbtype <- .get_db_type(db)
 
+  if (by == "station") {
+    command <- "SELECT station, COUNT(*) AS nrecs FROM '{tbl}' GROUP BY station"
+    empty <- data.frame(station = NA_integer_, nrecs = 0)
+
+  } else { # by == "total"
+    if (dbtype == "sqlite") {
+      if (approx) {
+        command <- "SELECT MAX(ROWID) AS nrecs FROM '{tbl}'"
+      } else {
+        command <- "SELECT COUNT(*) AS nrecs FROM '{tbl}'"
+      }
+
+    } else if (dbtype == "postgresql") {
+      if (approx) {
+        command <-
+          "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
+      } else {
+        command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
+      }
+    }
     empty <- data.frame(nrecs = 0)
   }
 
