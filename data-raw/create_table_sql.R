@@ -5,33 +5,31 @@ SQL_CREATE_TABLES <- list(
   create_synoptic_table = glue::glue(
     "CREATE TABLE Synoptic (
     station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
-    year INTEGER NOT NULL,         -- Four digit year
-    month INTEGER NOT NULL,        -- Month: 1-12
-    day INTEGER NOT NULL,          -- Day: 1-31
-    hour INTEGER NOT NULL,         -- Hour: 0-23
-    minute INTEGER NOT NULL,       -- Minute: 0-59
+    date_local TEXT NOT NULL,      -- 'yyyy-mm-dd' local (daylight saving) date
+    hour_local INTEGER NOT NULL,   -- Hour local time: 0-23
+    min_local INTEGER NOT NULL,    -- Minute local time: 0-59
+    date_std TEXT NOT NULL,        -- 'yyyy-mm-dd' standard date
+    hour_std INTEGER NOT NULL,     -- Hour standard time: 0-23
+    min_std INTEGER NOT NULL,      -- Minute standard time: 0-59
     precipitation REAL,            -- Rainfall (mm)
+    precipitation_quality CHAR(1), -- Rainfall quality code
     temperature REAL,              -- Temperature (degrees Celsius)
+    temperature_quality CHAR(1),   -- Temperature quality code
     relhumidity REAL,              -- Relative humidity (percentage)
+    relhumidity_quality CHAR(1),   -- Relative humidity quality code
     windspeed REAL,                -- Wind speed (km/h)
+    windspeed_quality CHAR(1),     -- Wind speed quality code
     winddir REAL,                  -- Wind direction (degrees)
+    winddir_quality CHAR(1),       -- Wind direction quality code
     tmaxdaily REAL DEFAULT NULL,   -- Maximum temperature per calendar day
     precipdaily REAL DEFAULT NULL, -- Total rainfall between 09:01 and 09:00 next day
     kbdi REAL DEFAULT NULL,        -- Keetch-Bryam drought index based on average rainfall
                                    --   at the station for 2001-2015
     drought REAL DEFAULT NULL,     -- Drought factor
-    ffdi REAL DEFAULT NULL,        -- Forest fire danger index
+    ffdi REAL DEFAULT NULL,        -- FFDI: Forest fire danger index
+    ffdi_quality CHAR(1),          -- FFDI quality code
 
-    UNIQUE(station, year, month, day, hour, minute),
-
-    CHECK (month >= 1 AND month <= 12),
-    CHECK (day >= 1),
-    CHECK (day <= 29 OR
-           (day = 30 AND month <> 2) OR
-           (day = 31 AND month IN (1,3,5,7,8,10,12))),
-    CHECK (hour >= 0 AND hour <= 23),
-    CHECK (minute >= 0 AND minute <= 59) );"),
-
+    UNIQUE(station, date_local, hour, minute) );"),
 
   # AWS data - differs only from Synoptic data in more frequent time steps
   # and the additional windgust variable, but it is convenient to have a
@@ -40,33 +38,33 @@ SQL_CREATE_TABLES <- list(
   create_aws_table = glue::glue(
     "CREATE TABLE AWS (
     station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
-    year INTEGER NOT NULL,         -- Four digit year
-    month INTEGER NOT NULL,        -- Month: 1-12
-    day INTEGER NOT NULL,          -- Day: 1-31
-    hour INTEGER NOT NULL,         -- Hour: 0-23
-    minute INTEGER NOT NULL,       -- Minute: 0-59
+    date_local TEXT NOT NULL,      -- 'yyyy-mm-dd' local (daylight saving) date
+    hour_local INTEGER NOT NULL,   -- Hour local time: 0-23
+    min_local INTEGER NOT NULL,    -- Minute local time: 0-59
+    date_std TEXT NOT NULL,        -- 'yyyy-mm-dd' standard date
+    hour_std INTEGER NOT NULL,     -- Hour standard time: 0-23
+    min_std INTEGER NOT NULL,      -- Minute standard time: 0-59
     precipitation REAL,            -- Rainfall (mm)
+    precipitation_quality CHAR(1), -- Rainfall quality code
     temperature REAL,              -- Temperature (degrees Celsius)
+    temperature_quality CHAR(1),   -- Temperature quality code
     relhumidity REAL,              -- Relative humidity (percentage)
+    relhumidity_quality CHAR(1),   -- Relative humidity quality code
     windspeed REAL,                -- Wind speed (km/h)
+    windspeed_quality CHAR(1),     -- Wind speed quality code
     winddir REAL,                  -- Wind direction (degrees)
+    winddir_quality CHAR(1),       -- Wind direction quality code
     windgust REAL,                 -- Maximum wind speed in last 10 minutes (km/h)
+    windgust_quality CHAR(1),      -- Wind gust quality code
     tmaxdaily REAL DEFAULT NULL,   -- Maximum temperature per calendar day
     precipdaily REAL DEFAULT NULL, -- Total rainfall between 09:01 and 09:00 next day
     kbdi REAL DEFAULT NULL,        -- Keetch-Bryam drought index based on average rainfall
                                    --   at the station for 2001-2015
     drought REAL DEFAULT NULL,     -- Drought factor
-    ffdi REAL DEFAULT NULL,        -- Forest fire danger index
+    ffdi REAL DEFAULT NULL,        -- FFDI: Forest fire danger index
+    ffdi_quality CHAR(1),          -- FFDI quality code
 
-    UNIQUE(station, year, month, day, hour, minute),
-
-    CHECK (month >= 1 AND month <= 12),
-    CHECK (day >= 1),
-    CHECK (day <= 29 OR
-           (day = 30 AND month <> 2) OR
-           (day = 31 AND month IN (1,3,5,7,8,10,12))),
-    CHECK (hour >= 0 AND hour <= 23),
-    CHECK (minute >= 0 AND minute <= 59) );"),
+    UNIQUE(station, date_local, hour, minute) );"),
 
   # BOM weather station metadata
   #
@@ -74,18 +72,21 @@ SQL_CREATE_TABLES <- list(
     "CREATE TABLE Stations (
     station INTEGER NOT NULL,      -- Integer station identifier assigned by BOM
     name TEXT NOT NULL,            -- Station name
-    start TEXT NOT NULL,           -- Start of operation: month and year
-    aws INTEGER NOT NULL,          -- 1: automatic weather station; 0: synoptic only
     state TEXT,                    -- State or territory (plus Antarctica)
+    startyear INTEGER NOT NULL,    -- First year of station operation
+    startmonth integer,            -- First month of station operation (1-12)
+    aws INTEGER NOT NULL,          -- 1: automatic weather station; 0: synoptic only
+    annualprecip_narclim REAL,     -- NARCLIM p12 average annual precipitation
     lon REAL NOT NULL,             -- Longitude (decimal degrees)
     lat REAL NOT NULL,             -- Latitude (decimal degrees)
-    annualprecip_narclim REAL,     -- NARCLIM p12 average annual precipitation
 
     UNIQUE(station),
 
     CHECK (aws IN (0,1)),
     CHECK (lon > 0),
-    CHECK (lat < 0) );")
+    CHECK (lat < 0),
+    CHECK (state IN ('ACT', 'ANT', 'NSW', 'NT', 'OS',
+                     'QLD', 'SA', 'TAS', 'VIC', 'WA')));")
 )
 
 
