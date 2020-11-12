@@ -6,7 +6,7 @@
 \usage{
 bom_db_update_fire(
   db,
-  tables = c("AWS", "Synoptic"),
+  tables = c("aws", "synoptic"),
   records = c("new", "all"),
   stations = NULL,
   av.rainfall.method = c("metadata", "records"),
@@ -15,8 +15,7 @@ bom_db_update_fire(
 )
 }
 \arguments{
-\item{db}{A database connection pool object as returned by
-\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
+\item{db}{A database connection pool object.}
 
 \item{tables}{Names of tables to update. The default is to only update the
 'AWS' table. Table names may be abbreviated.}

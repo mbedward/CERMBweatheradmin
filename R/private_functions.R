@@ -8,6 +8,14 @@
   if (!pool::dbIsValid(db))
     stop("Database connection pool has been closed or was not initialized properly")
 
+  # If the R session has been restarted, dbIsValid will return TRUE even
+  # though the pool is effectively closed. As a work-around we do a quick
+  # sniff query...
+  tryCatch(pool::dbListTables(db),
+           error = function(e) {
+             stop("Database connection pool is not valid, e.g. due to an R restart")
+           })
+
   tbls <- tolower(pool::dbListTables(db))
   Expected <- c("aws", "synoptic")
   found <- Expected %in% tbls

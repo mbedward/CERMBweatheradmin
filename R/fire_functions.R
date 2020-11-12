@@ -17,8 +17,7 @@
 #' use the NARCLIM station values. Note that at present the database does not
 #' record which option was used so it is up to you to be consistent (!)
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param db A database connection pool object.
 #'
 #' @param tables Names of tables to update. The default is to only update the
 #'   'AWS' table. Table names may be abbreviated.
@@ -57,7 +56,7 @@
 #' @export
 #'
 bom_db_update_fire <- function(db,
-                               tables = c("AWS", "Synoptic"),
+                               tables = c("aws", "synoptic"),
                                records = c("new", "all"),
                                stations = NULL,
                                av.rainfall.method = c("metadata", "records"),
@@ -80,6 +79,9 @@ bom_db_update_fire <- function(db,
                              several.ok = TRUE))
 
   res <- lapply(tables, function(the.table) {
+    ### TEMP
+    browser()
+
     table.stations <- stations
     if (length(table.stations) == 0) {
       cmd <- glue::glue("select distinct station
@@ -137,22 +139,22 @@ bom_db_update_fire <- function(db,
 
   # Check number of days for station to see if it's worth doing
   # FFDI calculations
-  cmd <- glue::glue("select count(*) as ndays from
-                       (select distinct year, month, day
-                        from {the.table}
-                        where station = {the.station});")
+  cmd <- glue::glue("SELECT COUNT(DISTINCT(date_std)) AS ndays
+                     FROM {the.table}
+                     WHERE station = {the.station};")
 
   res <- pool::dbGetQuery(db, cmd)
-  if (res$ndays < 30) {
+
+  if (res$ndays[1] < 30) {
     msg <- glue::glue("Skipping station {the.station}: \\
                        only has data for {res$ndays} days")
     warning(msg, immediate. = TRUE)
     return(0)
   }
 
-  cmd <- glue::glue("select * from {the.table}
-                    where station = {the.station}
-                    order by year, month, day, hour, minute;")
+  cmd <- glue::glue("SELECT * FROM {the.table}
+                    WHERE station = {the.station}
+                    ORDER BY date_std, hour_std, min_std;")
 
   dat <- pool::dbGetQuery(db, cmd)
   if (nrow(dat) == 0) return (0)
@@ -160,30 +162,34 @@ bom_db_update_fire <- function(db,
   dat$precipitation <- .na2zero(dat$precipitation)
 
   if (av.rainfall.method == "metadata") {
-    i <- which(CERMBweather::STATION_METADATA$station == the.station)
-    if (length(i)) {
-      av.rainfall <- CERMBweather::STATION_METADATA$annualprecip_narclim[i]
-      if (is.na(av.rainfall)) {
-        msg <- glue::glue("Skipping station {the.station}: \\
-                           missing rainfall value in STATION_METADATA")
-        warning(msg, immediate. = TRUE)
-        return(0)
-      }
-    } else {
+    cmd <- glue::glue("SELECT annualprecip_narclim FROM stations
+                      WHERE station = {the.station};")
+
+    res <- pool::dbGetQuery(db, cmd)
+
+    if (nrow(res) == 0) {
       msg <- glue::glue("Skipping station {the.station}: \\
-                         not found in STATION_METADATA")
+                         missing rainfall value in 'stations' table")
       warning(msg, immediate. = TRUE)
       return(0)
+
+    } else {
+      av.rainfall <- res$annualprecip_narclim[1]
     }
 
   } else if (av.rainfall.method == "records") {
+    xstart <- as.Date( paste0(min(AvRainfallYears), "-01-01") )
+    xend <- as.Date( paste0(max(AvRainfallYears), "-12-31") )
+
     # Check if average rainfall can be determined for the reference period
     xdat <- dat %>%
-      dplyr::filter(year %in% AvRainfallYears)
+      dplyr::select(station, date_std, hour_std, min_std, precipitation) %>%
+      dplyr::filter(date_std >= xstart, date_std <= xend)
 
     xcheck <- xdat %>%
+      dplyr::mutate(year = lubridate::year(date_std)) %>%
       dplyr::group_by(year) %>%
-      dplyr::summarize(ndays = dplyr::n_distinct(month, day))
+      dplyr::summarize(ndays = dplyr::n_distinct(date_std))
 
     if (!all(AvRainfallYears %in% xcheck$year) ||
         !all(xcheck$ndays >= MinDaysPerYear)) {
@@ -193,9 +199,14 @@ bom_db_update_fire <- function(db,
       return(0)
     }
 
-    xdat <- dat %>%
-      dplyr::filter(year %in% AvRainfallYears) %>%
-      bom_db_daily_rainfall(datatype = the.table, crop = TRUE, on.error = "null")
+
+    cmd <- glue::glue("SELECT date_local, hour_local, min_local,
+                         {aggregate_clause} AS precipdaily")
+
+    xdat <- .get_daily_rainfall(db,
+                                datatype = the.table,
+                                startdate = xstart,
+                                enddate = xend)
 
     if (is.null(xdat)) {
       msg <- glue::glue("Skipping station {the.station}: interrupted time series")
@@ -296,6 +307,134 @@ bom_db_update_fire <- function(db,
   })
 
   nrecs.updated
+}
+
+
+#' Get daily aggregate rainfall data
+#'
+#' @param db A database connection pool object.
+#'
+#' @param the.table The table to query: either 'aws' or 'synoptic'
+#'   (may be abbreviated).
+#'
+#' @param stations A vector containing one or more BOM weather station integer
+#'   IDs. Any values not present in the table will be silently ignored so, for
+#'   example, you could retrieve data for all (almost) NSW stations by calling
+#'   the function with \code{stations = 46000:75999}.
+#'
+#' @param crop If \code{TRUE} (default), the returned values will not include
+#'   the earliest rain date (09:01 - 09:00) in the series as this is most
+#'   probably a partial day.
+#'
+#' @param start.date The start date (local time) for the query, provided as
+#'   either a \code{Date} object or a character string in the format
+#'   \code{yyyy-mm-dd}. The default is to start from the earliest data for
+#'   each station.
+#'
+#' @param end.date The end date (local time) for the query, provided as
+#'   either a \code{Date} object or a character string in the format
+#'   \code{yyyy-mm-dd}. The default is to end with the latest data for each
+#'   station.
+#'
+#' @param dry.run If \code{TRUE}, the function returns the SQL code for the
+#'   query but does not run it. This can be useful if you want to further
+#'   modify the query. If \code{FALSE} (default), the function runs the query
+#'   and returns the resulting data.
+#'
+#' @export
+#'
+bom_db_get_daily_rainfall <- function(db,
+                                the.table,
+                                stations,
+                                crop = TRUE,
+                                start.date = NULL,
+                                end.date = NULL,
+                                dry.run = FALSE) {
+
+  if (!dry.run) .ensure_connection(db)
+
+  if (!(is.numeric(stations) && length(stations) > 0)) {
+    stop("stations arg should be a vector of integer station IDs")
+  }
+
+  the.table <- match.arg(tolower(the.table), choices = c("aws", "synoptic"))
+
+  if (is.character(start.date)) start.date <- as.Date(start.date)
+  if (is.character(end.date)) end.date <- as.Date(end.date)
+
+  # Clause to aggregate rain values for aws table (max value) and
+  # synoptic table (sum of values)
+  precip_daily_clause <- switch(
+    the.table,
+    aws = "MAX(precipitation)",
+    synoptic = "SUM(precipitation)",
+    stop("Unknown table name: ", the.table) )
+
+  # Clause to select station(s).
+  stations <- na.omit(stations)
+  stations_clause <- glue::glue("station IN ({paste(stations, collapse = ', ')})")
+
+  # If there are a lot of stations but the IDs are contiguous,
+  # create a neater version of the clause
+  if (length(stations) > 10) {
+    s0 <- min(stations)
+    s1 <- max(stations)
+    if (setequal(stations, s0:s1)) {
+      stations_clause <- glue::glue("station >= {s0} AND station <= {s1}")
+    }
+  }
+
+  # Clauses for start and end dates if specified.
+  # Note: the glue function returns an empty string if any input args
+  # are NULL but we won't rely on that behaviour in case it changes
+  # in the future
+  #
+  if (is.null(start.date)) {
+    start_clause <- ""
+  } else {
+    start_clause <- glue::glue("AND date_local >= '{start.date}'::date")
+  }
+
+  if (is.null(end.date)) {
+    end_clause <- ""
+  } else {
+    end_clause <- glue::glue("AND date_local <= '{end.date}'::date")
+  }
+
+  cmd <- glue::glue(
+    "SELECT station,
+            date_rain,
+            -- using coalesce() to replace nulls with zero
+            COALESCE({precip_daily_clause}, 0) AS precip_daily
+    FROM (
+      SELECT station, precipitation,
+        CASE
+          WHEN hour_local > 9 OR (hour_local = 9 AND min_local > 0) THEN date_local
+          ELSE (date_local - INTERVAL '1 day')::date
+        END
+        AS date_rain
+      FROM {the.table}
+      WHERE {stations_clause} {start_clause} {end_clause}) AS sub_daily
+
+    GROUP BY station, date_rain
+    ORDER BY station, date_rain;")
+
+  if (dry.run) {
+    # Just return composed query text
+    cmd
+  } else {
+    # Run query and return data
+    res <- pool::dbGetQuery(db, cmd)
+
+    if (crop) {
+      res <- res %>%
+        dplyr::group_by(station) %>%
+        dplyr::filter(date_rain > min(date_rain)) %>%
+        dplyr::ungroup()
+    }
+
+    res
+  }
 }
 
 
@@ -929,123 +1068,4 @@ bom_db_effective_rainfall <- function(precipdaily, start.balance = 0) {
 }
 
 
-#' Aggregate rainfall values to daily time steps
-#'
-#' This is primarily a helper function called by other functions when
-#' calculating fire-related variables. It aggregates sub-daily rainfall data to
-#' daily values, taking into account the different conventions used for AWS and
-#' Syoptic data sources. Each value for each day is the total rainfall recorded
-#' from 09:01 that day to 09:00 the following day. If there are any missing days
-#' in the time series, the function will either stop with an error or return
-#' \code{NULL} depending on the value of the \code{on.error} argument.
-#'
-#' @param dat A data set of sub-daily weather records for either an AWS or a
-#'   Synoptic source.
-#'
-#' @param datatype Source type of data. Default is to guess based on data
-#'   values.
-#'
-#' @param crop If \code{TRUE} (default), discard the rainfall for an initial
-#'   part day.
-#'
-#' @param on.error Action to perform if there is any interruption in the time
-#'   series. If \code{'stop'}, the function will stop with an error message. If
-#'   \code{'null'}, the function will return NULL.
-#'
-#' @return A data frame with columns: station (if present in the input data),
-#'   year, month, day, precipdaily.
-#'
-#' @export
-#'
-bom_db_daily_rainfall <- function(dat,
-                                  datatype = c("guess", "aws", "synoptic"),
-                                  crop = FALSE,
-                                  on.error = c("stop", "null")) {
-
-  on.error <- match.arg(on.error)
-
-  colnames(dat) <- tolower(colnames(dat))
-
-  RequiredCols <- c("year", "month", "day", "hour", "minute", "precipitation")
-  .require_columns(dat, RequiredCols)
-
-  HasStation <- "station" %in% colnames(dat)
-  if (!HasStation) dat$station <- 0
-
-  datatype <- match.arg(tolower(datatype), choices = c("guess", "aws", "synoptic"))
-  if (datatype == "guess") {
-    # check first station
-    the.stn <- dat$station[1]
-    datatype <- .guess_data_type(dplyr::filter(dat, station == the.stn))
-  }
-
-  # Helper function to aggregate rain-day values
-  fn_rainday <- function(rain) {
-    rain <- na.omit(rain)
-    if (length(rain) == 0) {
-      0
-    } else {
-      ifelse(datatype == "aws", max(rain), sum(rain))
-    }
-  }
-
-  stns <- unique(dat$station)
-
-  res <- lapply(stns, function(the.stn) {
-    dat.stn <- dplyr::filter(dat, station == the.stn)
-
-    check <- bom_db_check_datetimes(dat.stn, daily = FALSE)[[1]]
-
-    if (!check$ok) {
-      if (on.error == "null") {
-        return(NULL)
-      } else {
-        gap.msg <- ""
-        if (length(check$gaps) > 0) gap.msg <- paste(check$gaps, collapse = " ")
-        msg <- glue::glue("Problem with data for station {the.stn}
-                        {check$err}
-                        {gap.msg}")
-        stop(msg)
-      }
-    }
-
-    dat.stn <- dat.stn %>%
-      dplyr::arrange(year, month, day, hour, minute) %>%
-
-      dplyr::mutate(raindate = CERMBweather:::.ymd_to_date(year, month, day),
-                    timestr = sprintf("%02d%02d", hour, minute))
-
-    # Do this bit outside of dplyr to avoid it spuriously converting
-    # dates to integers
-    ii <- dat.stn$timestr < "0901"
-    dat.stn$raindate[ii] <- dat.stn$raindate[ii] - 1
-
-    min.raindate <- min(dat.stn$raindate)
-
-    dat.stn <- dat.stn %>%
-      dplyr::group_by(raindate) %>%
-      dplyr::summarize(precipdaily = fn_rainday(precipitation))
-
-
-    if (crop) dat.stn <- dplyr::filter(dat.stn, raindate > min.raindate)
-
-    # Add year, month day back in, and return
-    dat.stn %>%
-      dplyr::bind_cols(CERMBweather:::.date_to_ymd(.$raindate)) %>%
-      dplyr::select(year, month, day, precipdaily)
-  })
-
-  # Check for problems
-  if (on.error == "null" && any(sapply(res, is.null))) {
-    return(NULL)
-  }
-
-  # Combine results for stations
-  res <- dplyr::bind_rows(res)
-
-  # If there was no station column in the input, remove the temp column
-  if (!HasStation) res$station <- NULL
-
-  res
-}
 

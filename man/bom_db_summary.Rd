@@ -14,16 +14,19 @@ bom_db_summary(db, by = c("total", "station"), approx = TRUE)
 count of records by weather station.}
 
 \item{approx}{If TRUE (default) and \code{by == "total"} return an
-approximate record count based on the maximum RowID for each table. This is
-almost instant whereas a full record count is very slow (minutes rather
-than seconds) for large tables. However, it is approximate because RowID is
-an automatically incremented variable that does not account for any
-previously deleted records. Ignored when \code{by == "station"}.}
+approximate record count. This is almost instant whereas a full record
+count is very slow (minutes rather than seconds) for large tables. However,
+it is only approximate and might not reflect recent additions or deletions.
+Ignored when \code{by == "station"}.}
 }
 \value{
 A data frame with columns: table; station (if argument 'by' was
   'station'); nrecs.
 }
 \description{
-Gets the count of database records in the AWS and Synoptic tables.
+Gets the count of database records in the AWS and Synoptic tables. It can
+take forever to get an exact count of records, especially from a PostgreSQL
+database. Setting the \code{approx} argument to \code{TRUE} (default) will
+return a very fast, approximate total count. This argument is ignored if the
+function is called with \code{by = "station"}.
 }

@@ -7,8 +7,7 @@
 bom_db_synoptic(db)
 }
 \arguments{
-\item{db}{A database connection pool object as returned by
-\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
+\item{db}{A database connection pool object.}
 }
 \value{
 A \code{tbl} object representing the synoptic table to use with
@@ -20,11 +19,19 @@ This function takes an open connection to a database and returns a dplyr
 }
 \examples{
 \dontrun{
-# Connect to a database
-DB <- bom_db_open("c:/foo/bar/weather.db")
+# Connect to a SQLite database...
+DB <- pool::dbPool(RSQLite::SQLite(),
+                   dbname = "c:/foo/bar/weather.db")
+
+# ...or to a PostgreSQL database
+DB <- pool::dbPool(RPostgreSQL::PostgreSQL(),
+                   dbname = "some_database",
+                   host = "localhost",
+                   user = "username",
+                   password = "mypassword")
 
 # Get a tbl object for AWS data
-tsynoptic <- bom_db_aws(db)
+tsynoptic <- bom_db_aws(DB)
 
 # Get the field names in the table
 colnames(tsynoptic)
