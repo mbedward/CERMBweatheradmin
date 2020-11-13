@@ -159,7 +159,8 @@ bom_db_update_fire <- function(db,
   }
 
   # Get daily rainfall data for the station
-  dat.precipdaily <- bom_db_get_daily_rainfall(db, the.table, stations = the.station)
+  dat.precipdaily <- CERMBweather::bom_db_get_daily_rainfall(
+    db, the.table, stations = the.station)
 
   if (av.rainfall.method == "metadata") {
     cmd <- glue::glue("SELECT annualprecip_narclim FROM stations
@@ -295,137 +296,6 @@ bom_db_update_fire <- function(db,
   })
 
   nrecs.updated
-}
-
-
-#' Get daily aggregate rainfall data
-#'
-#' @param db A database connection pool object.
-#'
-#' @param the.table The table to query: either 'aws' or 'synoptic'
-#'   (may be abbreviated).
-#'
-#' @param stations A vector containing one or more BOM weather station integer
-#'   IDs. Any values not present in the table will be silently ignored so, for
-#'   example, you could retrieve data for all (almost) NSW stations by calling
-#'   the function with \code{stations = 46000:75999}.
-#'
-#' @param crop If \code{TRUE} (default), the returned values will not include
-#'   the earliest rain date (09:01 - 09:00) in the series as this is most
-#'   probably a partial day.
-#'
-#' @param start.date The start date (local time) for the query, provided as
-#'   either a \code{Date} object or a character string in the format
-#'   \code{yyyy-mm-dd}. The default is to start from the earliest data for
-#'   each station.
-#'
-#' @param end.date The end date (local time) for the query, provided as
-#'   either a \code{Date} object or a character string in the format
-#'   \code{yyyy-mm-dd}. The default is to end with the latest data for each
-#'   station.
-#'
-#' @param dry.run If \code{TRUE}, the function returns the SQL code for the
-#'   query but does not run it. This can be useful if you want to further
-#'   modify the query. If \code{FALSE} (default), the function runs the query
-#'   and returns the resulting data.
-#'
-#' @return A data frame with columns: station, date_rain (09:01 - 09:00 local
-#'   time), precip_daily.
-#'
-#' @export
-#'
-bom_db_get_daily_rainfall <- function(db,
-                                the.table,
-                                stations,
-                                crop = TRUE,
-                                start.date = NULL,
-                                end.date = NULL,
-                                dry.run = FALSE) {
-
-  if (!dry.run) .ensure_connection(db)
-
-  if (!(is.numeric(stations) && length(stations) > 0)) {
-    stop("stations arg should be a vector of integer station IDs")
-  }
-
-  the.table <- match.arg(tolower(the.table), choices = c("aws", "synoptic"))
-
-  if (is.character(start.date)) start.date <- as.Date(start.date)
-  if (is.character(end.date)) end.date <- as.Date(end.date)
-
-  # Clause to aggregate rain values for aws table (max value) and
-  # synoptic table (sum of values)
-  precip_daily_clause <- switch(
-    the.table,
-    aws = "MAX(precipitation)",
-    synoptic = "SUM(precipitation)",
-    stop("Unknown table name: ", the.table) )
-
-  # Clause to select station(s).
-  stations <- na.omit(stations)
-  stations_clause <- glue::glue("station IN ({paste(stations, collapse = ', ')})")
-
-  # If there are a lot of stations but the IDs are contiguous,
-  # create a neater version of the clause
-  if (length(stations) > 10) {
-    s0 <- min(stations)
-    s1 <- max(stations)
-    if (setequal(stations, s0:s1)) {
-      stations_clause <- glue::glue("station >= {s0} AND station <= {s1}")
-    }
-  }
-
-  # Clauses for start and end dates if specified.
-  # Note: the glue function returns an empty string if any input args
-  # are NULL but we won't rely on that behaviour in case it changes
-  # in the future
-  #
-  if (is.null(start.date)) {
-    start_clause <- ""
-  } else {
-    start_clause <- glue::glue("AND date_local >= '{start.date}'::date")
-  }
-
-  if (is.null(end.date)) {
-    end_clause <- ""
-  } else {
-    end_clause <- glue::glue("AND date_local <= '{end.date}'::date")
-  }
-
-  cmd <- glue::glue(
-    "SELECT station,
-            date_rain,
-            -- using coalesce() to replace nulls with zero
-            COALESCE({precip_daily_clause}, 0) AS precip_daily
-    FROM (
-      SELECT station, precipitation,
-        CASE
-          WHEN hour_local > 9 OR (hour_local = 9 AND min_local > 0) THEN date_local
-          ELSE (date_local - INTERVAL '1 day')::date
-        END
-        AS date_rain
-      FROM {the.table}
-      WHERE {stations_clause} {start_clause} {end_clause}) AS sub_daily
-
-    GROUP BY station, date_rain
-    ORDER BY station, date_rain;")
-
-  if (dry.run) {
-    # Just return composed query text
-    cmd
-  } else {
-    # Run query and return data
-    res <- pool::dbGetQuery(db, cmd)
-
-    if (crop) {
-      res <- res %>%
-        dplyr::group_by(station) %>%
-        dplyr::filter(date_rain > min(date_rain)) %>%
-        dplyr::ungroup()
-    }
-
-    res
-  }
 }
 
 
