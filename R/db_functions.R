@@ -11,9 +11,7 @@
 #' drought factor and FFDI) are \strong{not} calculated for the new records.
 #' call the function \code{bom_db_update_fire} to do this.
 #'
-#' @param db A database connection pool object created directly by the user (see
-#'   examples) or returned by \code{\link{bom_db_open}} or
-#'   \code{\link{bom_db_create}}.
+#' @param db A database connection pool object.
 #'
 #' @param datapath Character path to one of the following: an individual weather
 #'   station data file in CSV format; a directory containing one or more data
@@ -37,9 +35,11 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Connect to a PostgreSQL database
-#' DB <- bom_db_open(drv = RSQLite::SQLite(),
-#'                   dbname = "c:/somewhere/my_weather.db")
+#' # Connect to a PostgreSQL database using the pool package
+#' DB <- pool::dbPool(drv = RPostgres::Postgres(),
+#'                   host = "some.host.uow.edu.au",
+#'                   dbname = "cermb_weather",
+#'                   user = "myusername")
 #'
 #' # Import data from a BOM zip file containing individuals CSV-format
 #' # data files for weather stations
@@ -52,7 +52,7 @@
 #' bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 #'
 #' # Do other things, then at end of session...
-#' bom_db_close(DB)
+#' pool::poolClose(DB)
 #' }
 #'
 #' @export
@@ -77,35 +77,6 @@ bom_db_import <- function(db,
 
   else
     .do_import_file(db, datapath)
-}
-
-
-# Function to import new records into a SQLite database
-# via a parameterized query that takes advantage of
-# SQLite's parameter name matching and 'insert or ignore'
-# syntax.
-#
-.do_sqlite_import <- function(db, dat) {
-  stopifnot(.get_db_type(db) == "sqlite")
-
-  tblname <- attributes(dat)$datatype
-
-  varnames <- paste(colnames(dat), collapse = ", ")
-
-  params <- paste(paste0(":", colnames(dat)), collapse = ", ")
-
-  cmd <- glue::glue("INSERT OR IGNORE INTO {tblname}
-                      ({varnames})
-                      VALUES ({params});")
-
-  pool::poolWithTransaction(
-    db,
-    function(conn) {
-      rs <- DBI::dbSendStatement(conn, cmd)
-      DBI::dbBind(rs, params = dat)
-      DBI::dbClearResult(rs)
-    }
-  )
 }
 
 
@@ -165,6 +136,13 @@ bom_db_import <- function(db,
                            stations = NULL,
                            allow.missing = TRUE) {
 
+  dbtype <- .get_db_type(db)
+  if (dbtype == "sqlite") {
+    stop("SQLite support has been removed (for now)")
+  }
+
+  .ensure_connection(db)
+
   # Check for empty zip file
   info <- bom_zip_summary(zipfile)
   if (nrow(info) == 0) return(FALSE)
@@ -175,15 +153,8 @@ bom_db_import <- function(db,
 
   dats <- bom_zip_data(zipfile, stations, allow.missing)
 
-  dbtype <- .get_db_type(db)
-  if (dbtype == "sqlite") {
-    for (dat in dats) {
-      .do_sqlite_import(db, dat)
-    }
-  } else if (dbtype == "postgresql") {
-    for (dat in dats) {
-      .do_postgresql_import(db, dat)
-    }
+  for (dat in dats) {
+    .do_postgresql_import(db, dat)
   }
 }
 
@@ -217,178 +188,22 @@ bom_db_import <- function(db,
 # Helper function to import an individual CSV-format data file.
 #
 .do_import_file <- function(db, filepath) {
-  dat <- try(read.csv(filepath, stringsAsFactors = FALSE), silent=TRUE)
-
-  if (inherits(dat, "try-error")) {
-    FALSE
+  dbtype <- .get_db_type(db)
+  if (dbtype == "sqlite") {
+    stop("SQLite support has been removed (for now)")
   }
-  else {
+
+  dat <- tryCatch(
+    read.csv(filepath, stringsAsFactors = FALSE),
+    warning = function(w) NULL)
+
+  if (is.null(dat)) {
+    FALSE
+  } else {
     dat <- .map_fields(dat)
-
-    dbtype <- .get_db_type(db)
-
-    if (dbtype == "sqlite") {
-      .do_sqlite_import(db, dat)
-    } else if (dbtype == "postgresql") {
-      .do_postgresql_import(db, dat)
-    }
-
+    .do_postgresql_import(db, dat)
     TRUE
   }
-}
-
-
-#' Create a new SQLite database for weather data
-#'
-#' This function creates a new database with tables: 'synoptic' for synoptic
-#' data records; 'aws' for automatic weather station data records; and
-#' 'stations' with details of station names and locations. SQLite databases
-#' consist of a single file which holds all tables. The file extension is
-#' arbitrary and may be omitted, but using '.db' or '.sqlite' is recommended for
-#' sanity.
-#'
-#' @param dbpath A character path to the new database file. An error is thrown
-#'   if the file already exists.
-#'
-#' @return A database connection pool object that can be used with other package
-#'   functions such as \code{\link{bom_db_import}} as well as with \code{dplyr}
-#'   functions. It should be closed at the end of a session with
-#'   \code{\link{bom_db_close}}.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' # Create a new SQLite database with the required weather data tables
-#' # for AWS and synoptic data and weather station metadata
-#' DB <- bom_db_create_sqlite("c:/foo/bar/weather.db")
-#'
-#' # Do things with it
-#' bom_db_import(DB, "c:/foo/bar/some_bom_data.zip")
-#'
-#' # Close the connection object at the end of the session
-#' pool::poolClose(DB)
-#' }
-
-bom_db_create_sqlite <- function(dbpath) {
-  if (file.exists(dbpath)) stop("File already exists: ", dbpath)
-
-  db <- pool::dbPool(RSQLite::SQLite(), dbname = dbpath, flags = RSQLite::SQLITE_RWC)
-
-  pool::poolWithTransaction(db, function(conn) {
-    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_synoptic_table)
-    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_aws_table)
-    DBI::dbExecute(conn, SQL_CREATE_TABLES$create_stations_table)
-
-    DBI::dbWriteTable(conn, "Stations", CERMBweather::STATION_METADATA, append = TRUE)
-  })
-
-  db
-}
-
-
-#' Gets a \code{tbl} object for AWS data to use with dplyr functions
-#'
-#' This function takes an open connection to a database and returns a dplyr
-#' \code{tbl} object for AWS data to use with dplyr functions.
-#'
-#' @param db A database connection pool object.
-#'
-#' @return A \code{tbl} object representing the AWS table to use with dplyr.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' # Connect to a SQLite database...
-#' DB <- pool::dbPool(RSQLite::SQLite(),
-#'                    dbname = "c:/foo/bar/weather.db")
-#'
-#' # ...or to a PostgreSQL database
-#' DB <- pool::dbPool(RPostgreSQL::PostgreSQL(),
-#'                    dbname = "some_database",
-#'                    host = "localhost",
-#'                    user = "username",
-#'                    password = "mypassword")
-#'
-#' # Get a tbl object for AWS data
-#' taws <- bom_db_aws(DB)
-#'
-#' # Get the field names in the table
-#' colnames(taws)
-#'
-#' # Use dplyr to find the maximum temperature recorded at each
-#' # weather station
-#'
-#' library(dplyr)
-#'
-#' dat <- taws %>%
-#'   group_by(station) %>%
-#'   summarize(maxtemp = max(temperature, na.rm = TRUE)) %>%
-#'
-#'   # omit records for stations with no temperature values
-#'   filter(!is.na(maxtemp)) %>%
-#'
-#'   # tell dplyr to execute this query on the database
-#'   collect()
-#' }
-#'
-bom_db_aws <- function(db) {
-  .ensure_connection(db)
-  dplyr::tbl(db, "AWS")
-}
-
-
-#' Gets a \code{tbl} object for synoptic data to use with dplyr functions
-#'
-#' This function takes an open connection to a database and returns a dplyr
-#' \code{tbl} object for synoptic data to use with dplyr functions.
-#'
-#' @param db A database connection pool object.
-#'
-#' @return A \code{tbl} object representing the synoptic table to use with
-#'   dplyr.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' # Connect to a SQLite database...
-#' DB <- pool::dbPool(RSQLite::SQLite(),
-#'                    dbname = "c:/foo/bar/weather.db")
-#'
-#' # ...or to a PostgreSQL database
-#' DB <- pool::dbPool(RPostgreSQL::PostgreSQL(),
-#'                    dbname = "some_database",
-#'                    host = "localhost",
-#'                    user = "username",
-#'                    password = "mypassword")
-#'
-#' # Get a tbl object for AWS data
-#' tsynoptic <- bom_db_aws(DB)
-#'
-#' # Get the field names in the table
-#' colnames(tsynoptic)
-#'
-#' # Use dplyr to find the maximum temperature recorded at each
-#' # weather station
-#'
-#' library(dplyr)
-#'
-#' dat <- tsynoptic %>%
-#'   group_by(station) %>%
-#'   summarize(maxtemp = max(temperature, na.rm = TRUE)) %>%
-#'
-#'   # omit records for stations with no temperature values
-#'   filter(!is.na(maxtemp)) %>%
-#'
-#'   # tell dplyr to execute this query on the database
-#'   collect()
-#' }
-#'
-bom_db_synoptic <- function(db) {
-  .ensure_connection(db)
-  dplyr::tbl(db, "Synoptic")
 }
 
 
@@ -400,8 +215,7 @@ bom_db_synoptic <- function(db) {
 #' return a very fast, approximate total count. This argument is ignored if the
 #' function is called with \code{by = "station"}.
 #'
-#' @param db A database connection pool object as returned by
-#'   \code{\link{bom_db_open}} or \code{\link{bom_db_create}}.
+#' @param db A database connection pool object.
 #'
 #' @param by One of 'total' for total records per table, or 'station' for
 #'   count of records by weather station.
@@ -420,29 +234,23 @@ bom_db_synoptic <- function(db) {
 bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
   by = match.arg(by)
 
-  .ensure_connection(db)
-
   dbtype <- .get_db_type(db)
+  if (dbtype == "sqlite") {
+    stop("SQLite support has been removed (for now)")
+  }
+
+  .ensure_connection(db)
 
   if (by == "station") {
     command <- "SELECT station, COUNT(*) AS nrecs FROM '{tbl}' GROUP BY station"
     empty <- data.frame(station = NA_integer_, nrecs = 0)
 
   } else { # by == "total"
-    if (dbtype == "sqlite") {
-      if (approx) {
-        command <- "SELECT MAX(ROWID) AS nrecs FROM '{tbl}'"
-      } else {
-        command <- "SELECT COUNT(*) AS nrecs FROM '{tbl}'"
-      }
-
-    } else if (dbtype == "postgresql") {
-      if (approx) {
-        command <-
-          "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
-      } else {
-        command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
-      }
+    if (approx) {
+      command <-
+        "SELECT reltuples::BIGINT AS nrecs FROM pg_class WHERE relname='public.{tbl}';"
+    } else {
+      command <- "SELECT COUNT(*) AS nrecs FROM public.{tbl}"
     }
     empty <- data.frame(nrecs = 0)
   }

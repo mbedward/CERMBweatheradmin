@@ -71,8 +71,7 @@
   } else if (con.type == "pqconnection") {
     "postgresql"
   } else if (con.type == "postgresqlconnection") {
-    stop("RPostgreSQL package connections are not supported.\n",
-         "Use the RPostgres package instead.")
+    stop("Please use the 'RPostgres' package instead of 'RPostgreSQL'")
   } else {
     stop("Unsupported connection type: ", con.type)
   }

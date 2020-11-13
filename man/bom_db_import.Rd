@@ -7,9 +7,7 @@
 bom_db_import(db, datapath, stations = NULL, allow.missing = TRUE)
 }
 \arguments{
-\item{db}{A database connection pool object created directly by the user (see
-examples) or returned by \code{\link{bom_db_open}} or
-\code{\link{bom_db_create}}.}
+\item{db}{A database connection pool object.}
 
 \item{datapath}{Character path to one of the following: an individual weather
 station data file in CSV format; a directory containing one or more data
@@ -44,9 +42,11 @@ call the function \code{bom_db_update_fire} to do this.
 }
 \examples{
 \dontrun{
-# Connect to a PostgreSQL database
-DB <- bom_db_open(drv = RSQLite::SQLite(),
-                  dbname = "c:/somewhere/my_weather.db")
+# Connect to a PostgreSQL database using the pool package
+DB <- pool::dbPool(drv = RPostgres::Postgres(),
+                  host = "some.host.uow.edu.au",
+                  dbname = "cermb_weather",
+                  user = "myusername")
 
 # Import data from a BOM zip file containing individuals CSV-format
 # data files for weather stations
@@ -59,7 +59,7 @@ bom_db_import(DB, "c:/bom/archive/aws_files/")
 bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 
 # Do other things, then at end of session...
-bom_db_close(DB)
+pool::poolClose(DB)
 }
 
 }

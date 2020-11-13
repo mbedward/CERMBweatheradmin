@@ -84,11 +84,17 @@ bom_db_update_fire <- function(db,
 
     table.stations <- stations
     if (length(table.stations) == 0) {
-      cmd <- glue::glue("select distinct station
-                        from {the.table} order by station;")
 
-      table.stations <- pool::dbGetQuery(db, cmd) %>%
-        dplyr::pull(station)
+      # We get distinct station numbers from the preset view
+      # (either aws_stations or synoptic_stations) which is hugely
+      # faster than doing 'SELECT DISTINCT(station)'
+      #
+      cmd <- glue::glue("SELECT station
+                         FROM {the.table}_stations
+                         ORDER BY station;")
+
+      res <- pool::dbGetQuery(db, cmd) %>%
+      table.stations <- res$station
     }
 
     Nstns <- length(table.stations)
@@ -139,7 +145,7 @@ bom_db_update_fire <- function(db,
 
   # Check number of days for station to see if it's worth doing
   # FFDI calculations
-  cmd <- glue::glue("SELECT COUNT(DISTINCT(date_std)) AS ndays
+  cmd <- glue::glue("SELECT COUNT(DISTINCT(date_local)) AS ndays
                      FROM {the.table}
                      WHERE station = {the.station};")
 
@@ -152,14 +158,8 @@ bom_db_update_fire <- function(db,
     return(0)
   }
 
-  cmd <- glue::glue("SELECT * FROM {the.table}
-                    WHERE station = {the.station}
-                    ORDER BY date_std, hour_std, min_std;")
-
-  dat <- pool::dbGetQuery(db, cmd)
-  if (nrow(dat) == 0) return (0)
-
-  dat$precipitation <- .na2zero(dat$precipitation)
+  # Get daily rainfall data for the station
+  dat.precipdaily <- bom_db_get_daily_rainfall(db, the.table, stations = the.station)
 
   if (av.rainfall.method == "metadata") {
     cmd <- glue::glue("SELECT annualprecip_narclim FROM stations
@@ -178,45 +178,33 @@ bom_db_update_fire <- function(db,
     }
 
   } else if (av.rainfall.method == "records") {
+    # Check if the data are sufficient to calculate average rainfall
+    # for the reference period
+    #
     xstart <- as.Date( paste0(min(AvRainfallYears), "-01-01") )
     xend <- as.Date( paste0(max(AvRainfallYears), "-12-31") )
 
-    # Check if average rainfall can be determined for the reference period
-    xdat <- dat %>%
-      dplyr::select(station, date_std, hour_std, min_std, precipitation) %>%
-      dplyr::filter(date_std >= xstart, date_std <= xend)
+    # Note: the date column in dat.precipdaily will be 'date_rain'
+    xrefdata <- dat.precipdaily %>%
+      dplyr::filter(date_rain >= xstart, date_rain <= xend) %>%
 
-    xcheck <- xdat %>%
-      dplyr::mutate(year = lubridate::year(date_std)) %>%
+      dplyr::mutate(year = lubridate::year(date_rain)) %>%
+
       dplyr::group_by(year) %>%
-      dplyr::summarize(ndays = dplyr::n_distinct(date_std))
 
-    if (!all(AvRainfallYears %in% xcheck$year) ||
-        !all(xcheck$ndays >= MinDaysPerYear)) {
+      dplyr::summarize(ndays = dplyr::n_distinct(date_rain))
+
+    if (!all(AvRainfallYears %in% xrefdata$year) ||
+        !all(xrefdata$ndays >= MinDaysPerYear)) {
       msg <- glue::glue("Skipping station {the.station}: \\
                          cannot calculate average rainfall")
       message(msg)
       return(0)
     }
 
-
-    cmd <- glue::glue("SELECT date_local, hour_local, min_local,
-                         {aggregate_clause} AS precipdaily")
-
-    xdat <- .get_daily_rainfall(db,
-                                datatype = the.table,
-                                startdate = xstart,
-                                enddate = xend)
-
-    if (is.null(xdat)) {
-      msg <- glue::glue("Skipping station {the.station}: interrupted time series")
-      warning(msg)
-      return(0)
-    }
-
-    xdat <- xdat %>%
+    xrefdata <- xrefdata %>%
       dplyr::group_by(year) %>%
-      dplyr::summarize(totalrain = sum(precipdaily))
+      dplyr::summarize(totalrain = sum(precip_daily))
 
     av.rainfall <- mean(xdat$totalrain)
   }
@@ -340,6 +328,9 @@ bom_db_update_fire <- function(db,
 #'   query but does not run it. This can be useful if you want to further
 #'   modify the query. If \code{FALSE} (default), the function runs the query
 #'   and returns the resulting data.
+#'
+#' @return A data frame with columns: station, date_rain (09:01 - 09:00 local
+#'   time), precip_daily.
 #'
 #' @export
 #'

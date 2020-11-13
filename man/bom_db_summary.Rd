@@ -7,8 +7,7 @@
 bom_db_summary(db, by = c("total", "station"), approx = TRUE)
 }
 \arguments{
-\item{db}{A database connection pool object as returned by
-\code{\link{bom_db_open}} or \code{\link{bom_db_create}}.}
+\item{db}{A database connection pool object.}
 
 \item{by}{One of 'total' for total records per table, or 'station' for
 count of records by weather station.}

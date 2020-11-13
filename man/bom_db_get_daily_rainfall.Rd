@@ -44,6 +44,10 @@ query but does not run it. This can be useful if you want to further
 modify the query. If \code{FALSE} (default), the function runs the query
 and returns the resulting data.}
 }
+\value{
+A data frame with columns: station, date_rain (09:01 - 09:00 local
+  time), precip_daily.
+}
 \description{
 Get daily aggregate rainfall data
 }
