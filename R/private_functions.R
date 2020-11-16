@@ -59,6 +59,17 @@
 }
 
 
+# An alternative to the base R file.path function that attempts to resolve
+# the mix of single, double, forward and back slashes that can occur.
+#
+.safe_file_path <- function(...) {
+  x <- file.path(...)
+  x <- stringr::str_split(x, "[\\\\/]+")
+  sapply(x, stringr::str_c, collapse = "/")
+}
+
+
+
 # Determine if the database connection is SQLite or PostgreSQL
 # and issue an error if it is anything else.
 .get_db_type <- function(db) {
@@ -78,111 +89,25 @@
 }
 
 
-# Selects and renames columns in a data frame of raw data.
-# Adds data type (aws or synoptic) and column types as attributes
-# of the returned data frame.
+# Formats station numbers to match the embedded strings in station
+# data file names. Identifiers can be provided as integers or strings.
+# A valid station number has between four and six digits.
 #
-# Columns: year, month, day are combined into a 'date' column.
-# Hour and minute columns are kept separate and no time zone information
-# is assigned.
+# @param id Vector (integer or character) of one or more station
+#   identifying numbers.
 #
-.map_fields <- function(dat) {
-  type <- .get_bomdata_type(dat)
+.station_id_to_text <- function(id) {
+  if (is.numeric(id)) {
+    id <- sapply(id, function(x) sprintf("%06d", x))
+  }
+  else if (is.character(id)) {
+    len <- stringr::str_length(id)
+    if ( any(len > 6) ) stop("One or more station identifiers have more than 6 characters")
 
-  lookup <- dplyr::filter(COLUMN_LOOKUP, datatype == type)
-  cnames <- tolower(colnames(dat))
-  lookupnames <- tolower(lookup[["input"]])
-  ii <- match(cnames, lookupnames)
-  if (anyNA(ii)) stop("Unrecognized column name(s): ", colnames(dat)[is.na(ii)])
-
-  importnames <- lookup[["importcolname"]][ii]
-  ii.keep <- !is.na(importnames)
-
-  dat <- dat[, ii.keep]
-  colnames(dat) <- importnames[ii.keep]
-
-
-  # Combine the separate year, month, day columns for local and standard
-  # time into two date columns.
-  dat <- dat %>%
-    dplyr::mutate(date_local = sprintf("%4d-%02d-%02d",
-                                       year_local, month_local, day_local),
-                  date_std = sprintf("%4d-%02d-%02d",
-                                     year_std, month_std, day_std))
-
-  dat <- dat[, na.omit(lookup$dbcolname)]
-
-  attr(dat, "datatype") <- type
-
-  coltypes <- sapply(colnames(dat), function(cn) {
-    i <- match(cn, lookup[["dbcolname"]])
-    if (is.na(i)) stop("Data column name missing from lookup table: ", cn)
-    lookup[["dbcoltype"]][i]
-  })
-
-  attr(dat, "coltypes") <- coltypes
-
-  # Sometimes there are non-numeric values in the measure fields
-  # (e.g. whitespace or '###'). Guard against this by converting
-  # each measure field to numeric. Non-numeric values will be
-  # coerced to NA.
-  for (i in 4:length(coltypes)) {
-    suppressWarnings(
-      if (coltypes[i] == "numeric") {
-        if (!is.numeric(dat[[i]])) {
-          dat[[i]] <- as.numeric(dat[[i]])
-        }
-      }
-    )
+    id <- stringr::str_pad(id, width = 6, side = "left", pad = "0")
   }
 
-  dat
-}
-
-
-# Determines whether a BOM data set is for AWS or Synoptic data by checking
-# for either of two columns only in AWS data (windgust and AWS flag).
-# Note: this is using the column names expected in BOM data, not the standard
-# names used in the database.
-.get_bomdata_type <- function(dat.raw) {
-  cnames <- tolower(colnames(dat.raw))
-  if (any(stringr::str_detect(cnames, "maximum.windgust|aws.flag"))) {
-    "aws"
-  } else {
-    "synoptic"
-  }
-}
-
-
-.is_zip_file <- function(paths) {
-  path <- stringr::str_trim(paths)
-  stringr::str_detect(tolower(paths), "\\.zip$")
-}
-
-
-.is_directory <- function(paths) {
-  file.info(paths)$isdir
-}
-
-
-.get_file_name <- function(paths) {
-  x <- stringr::str_split(paths, "[\\\\/]+")
-  sapply(x, tail, 1)
-}
-
-
-# guards against double or mixed slashes in constructed paths
-# (there must be a more elegant alternative)
-.safe_file_path <- function(...) {
-  x <- file.path(...)
-  x <- stringr::str_split(x, "[\\\\/]+")
-  sapply(x, stringr::str_c, collapse = "/")
-}
-
-
-.extract_station_numbers <- function(filenames) {
-  x <- stringr::str_extract(filenames, "_Data_\\d+")
-  stringr::str_extract(x, "\\d+")
+  id
 }
 
 

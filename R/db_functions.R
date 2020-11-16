@@ -69,10 +69,10 @@ bom_db_import <- function(db,
 
   .ensure_connection(db)
 
-  if (.is_zip_file(datapath))
+  if (CERMBweather::bom_db_is_zip_file(datapath))
     .do_import_zip(db, datapath, stations, allow.missing)
 
-  else if (.is_directory(datapath))
+  else if (file.info(datapath)$isdir)
     .do_import_dir(db, datapath, stations, allow.missing)
 
   else
@@ -144,14 +144,14 @@ bom_db_import <- function(db,
   .ensure_connection(db)
 
   # Check for empty zip file
-  info <- bom_zip_summary(zipfile)
+  info <- CERMBweather::bom_db_zip_summary(zipfile)
   if (nrow(info) == 0) return(FALSE)
 
   if (is.null(stations)) {
     stations <- info[["station"]]
   }
 
-  dats <- bom_zip_data(zipfile, stations, allow.missing)
+  dats <- CERMBweather::bom_db_zip_data(zipfile, stations, allow.missing)
 
   for (dat in dats) {
     .do_postgresql_import(db, dat)
@@ -170,7 +170,7 @@ bom_db_import <- function(db,
   info <- bom_dir_summary(dirpath)
 
   if (!is.null(stations)) {
-    ids <- bom_station_id(stations)
+    ids <- .station_id_to_text(stations)
     info <- dplyr::filter(info, station %in% ids)
   }
 
@@ -200,7 +200,7 @@ bom_db_import <- function(db,
   if (is.null(dat)) {
     FALSE
   } else {
-    dat <- .map_fields(dat)
+    dat <- CERMBweather::bom_db_tidy_data(dat)
     .do_postgresql_import(db, dat)
     TRUE
   }
@@ -371,33 +371,5 @@ bom_db_check_datetimes <- function(dat, daily) {
   })
 
   checks
-}
-
-
-#' Format station identifying numbers as character strings
-#'
-#' Formats station numbers to match the embedded strings in station
-#' data file names. Identifiers can be provided as integers or strings.
-#' A valid station number has between four and six digits.
-#'
-#' @param id Vector (integer or character) of one or more station
-#'   identifying numbers.
-#'
-#' @return Vector of formatted identifiers.
-#'
-#' @export
-#'
-bom_station_id <- function(id) {
-  if (is.numeric(id)) {
-    id <- sapply(id, function(x) sprintf("%06d", x))
-  }
-  else if (is.character(id)) {
-    len <- stringr::str_length(id)
-    if ( any(len > 6) ) stop("One or more station identifiers have more than 6 characters")
-
-    id <- stringr::str_pad(id, width = 6, side = "left", pad = "0")
-  }
-
-  id
 }
 

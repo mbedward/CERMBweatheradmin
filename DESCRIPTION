@@ -1,7 +1,7 @@
 Package: CERMBweatheradmin
 Title: Functions to manage a PostgreSQL database of weather station records
-Version: 0.3.0
-Date: 2020-11-13
+Version: 0.3.1
+Date: 2020-11-16
 Authors@R: c(
   person("Hamish", "Clarke", email = "hamishc@uow.edu.au", role = c("aut")),
   person("Michael", "Bedward", email = "michael.bedward@gmail.com", role = c("aut", "cre")) )
@@ -11,7 +11,7 @@ Description: Tools developed by the Centre for Environmental Risk Management
   Meteorology, and to calculate fire-related indices such as Forest Fire
   Danger Index..
 Depends: R (>= 4.0.0)
-Imports: CERMBweather (>= 0.3.0),
+Imports: CERMBweather (>= 0.3.1),
   DBI,
   dbplyr,
   dplyr,

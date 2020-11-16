@@ -26,7 +26,7 @@ bom_dir_summary <- function(path, include = c("data", "all", "empty")) {
 
   sizes <- file.size(filepaths)
 
-  station <- .extract_station_numbers(files)
+  station <- CERMBweather::bom_db_extract_station_numbers(files)
 
   dat <- data.frame(station, filename = files, filesize = sizes,
                     stringsAsFactors = FALSE)
