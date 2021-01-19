@@ -11,11 +11,12 @@
 #' time series, i.e. no gaps in the sequence of dates.
 #'
 #' KBDI calculations require an average annual precipitation value. This can
-#' either be taken from the station values in the \code{\link{STATION_METADATA}}
-#' table, derived from the NARCLIM 'p12' layer, or calculated from stations
-#' records for the 2001-2015 period. The default, and recommended option, is to
-#' use the NARCLIM station values. Note that at present the database does not
-#' record which option was used so it is up to you to be consistent (!)
+#' either be taken from the average annual rainfall values held in the
+#' 'stations' table (derived from the NARCLIM 'p12' layer) or calculated from
+#' stations records for the 2001-2015 period. The default, and recommended
+#' option, is to use the NARCLIM station values. Note that at present the
+#' database does not record which option was used so it is up to you to be
+#' consistent (!)
 #'
 #' @param db A database connection pool object.
 #'
@@ -34,10 +35,10 @@
 #'   update all stations.
 #'
 #' @param av.rainfall.method Either 'metadata' (default and recommended) to take
-#'   average rainfall values from the \code{STATIONS_METADATA} table; or
-#'   'records' to calculate average rainfall from station records over the period
-#'   2001 - 2015. With the latter option, any station that does not have data
-#'   for the whole of the reference period will be ignored.
+#'   average rainfall values from the 'stations' table; or 'records' to
+#'   calculate average rainfall from station records over the period 2001 -
+#'   2015. With the latter option, any station that does not have data for the
+#'   whole of the reference period will be ignored.
 #'
 #' @param min.days.required The minimum number of days of data required to
 #'   perform calculations for a station. The default and smallest allowable
@@ -119,6 +120,8 @@ bom_db_update_fire <- function(db,
 }
 
 
+#' @importFrom rlang .data
+#'
 .do_update_fire <- function(db,
                             the.table,
                             the.station,
@@ -163,7 +166,8 @@ bom_db_update_fire <- function(db,
     db, the.table, stations = the.station)
 
   if (av.rainfall.method == "metadata") {
-    cmd <- glue::glue("SELECT annualprecip_narclim FROM stations
+    cmd <- glue::glue("SELECT annualprecip_narclim
+                      FROM stations
                       WHERE station = {the.station};")
 
     res <- pool::dbGetQuery(db, cmd)
@@ -186,14 +190,17 @@ bom_db_update_fire <- function(db,
     xend <- as.Date( paste0(max(AvRainfallYears), "-12-31") )
 
     # Note: the date column in dat.precipdaily will be 'date_rain'
+    #
+    # Using .data keyword to avoid R package check errors
+    #
     xrefdata <- dat.precipdaily %>%
-      dplyr::filter(date_rain >= xstart, date_rain <= xend) %>%
+      dplyr::filter(.data$date_rain >= xstart, .data$date_rain <= xend) %>%
 
-      dplyr::mutate(year = lubridate::year(date_rain)) %>%
+      dplyr::mutate(year = lubridate::year(.data$date_rain)) %>%
 
-      dplyr::group_by(year) %>%
+      dplyr::group_by(.data$year) %>%
 
-      dplyr::summarize(ndays = dplyr::n_distinct(date_rain))
+      dplyr::summarize(ndays = dplyr::n_distinct(.data$date_rain))
 
     if (!all(AvRainfallYears %in% xrefdata$year) ||
         !all(xrefdata$ndays >= MinDaysPerYear)) {
@@ -204,16 +211,37 @@ bom_db_update_fire <- function(db,
     }
 
     xrefdata <- xrefdata %>%
-      dplyr::group_by(year) %>%
-      dplyr::summarize(totalrain = sum(precip_daily))
+      dplyr::group_by(.data$year) %>%
+      dplyr::summarize(totalrain = sum(.data$precip_daily, na.rm = TRUE))
 
     av.rainfall <- mean(xdat$totalrain)
   }
 
   if (records == "new") {
-    # Subset to records at the end of the time series that do
+    cmd <- glue::glue("SELECT date_local, (count(ffdi) > 0) AS has_ffdi
+                      FROM {the.table}
+                      WHERE station = {the.station}
+                      GROUP BY date_local
+                      ORDER BY date_local;")
+
+    ffdi.days <- pool::dbGetQuery(db, cmd)
+
+    ndays <- nrow(ffdi.days)
+
+    if (ffdi.days$has_ffdi[ndays]) {
+      # The most recent day has FFDI so nothing more to do
+      return(0)
+    }
+
+    # Still here, so we need to do some FFDI calculations.
+    # Find the subset of records at the end of the time series that do
     # not have FFDI values plus 20 days of preceding records
     # (for drought factor calculation)
+
+
+    ######### WRITE ME ############
+
+
     irec <- .find_na_tail(dat$ffdi)
 
     if (is.na(irec)) {
@@ -237,7 +265,7 @@ bom_db_update_fire <- function(db,
       if (!check$ok) {
         # if there are gaps we can only work with the most recent
         # uninterrupted subset
-        gap.date <- tail(check$gaps, 1)
+        gap.date <- utils::tail(check$gaps, 1)
         ymd.start <- .date_to_ymd(gap.date)
 
         dat <- dat %>%
@@ -680,7 +708,7 @@ bom_db_kbdi <- function(dat.daily,
       # data are available for that period, we set previous KBDI to
       # maximum deficit of 203.2
       #
-      Krecent <- na.omit( Kday[(i-2):max(1, i-30)] )
+      Krecent <- stats::na.omit( Kday[(i-2):max(1, i-30)] )
       if (length(Krecent) > 0) {
         # most recent non-missing value
         Kprev <- Krecent[1]

@@ -17,7 +17,7 @@
            })
 
   tbls <- tolower(pool::dbListTables(db))
-  Expected <- c("aws", "synoptic")
+  Expected <- c("aws", "synoptic", "stations")
   found <- Expected %in% tbls
 
   if (any(!found)) {
@@ -28,22 +28,6 @@
     msg2 <- paste(Expected[!found], collapse=", ")
     msg <- glue::glue("Database is missing {msg1} {msg2}")
     stop(msg)
-  }
-}
-
-
-# Checks if the 'Stations' table is present and, if not, creates
-# and populates it. We assume that the db connection is valid.
-.ensure_stations_table <- function(db) {
-  tbls <- tolower(pool::dbListTables(db))
-  found <- "stations" %in% tbls
-  if (!found) {
-    message("Adding Stations table to database")
-
-    pool::poolWithTransaction(db, function(conn) {
-      DBI::dbExecute(conn, SQL_CREATE_TABLES$create_stations_table)
-      DBI::dbAppendTable(conn, "Stations", CERMBweather::STATION_METADATA)
-    })
   }
 }
 
@@ -86,28 +70,6 @@
   } else {
     stop("Unsupported connection type: ", con.type)
   }
-}
-
-
-# Formats station numbers to match the embedded strings in station
-# data file names. Identifiers can be provided as integers or strings.
-# A valid station number has between four and six digits.
-#
-# @param id Vector (integer or character) of one or more station
-#   identifying numbers.
-#
-.station_id_to_text <- function(id) {
-  if (is.numeric(id)) {
-    id <- sapply(id, function(x) sprintf("%06d", x))
-  }
-  else if (is.character(id)) {
-    len <- stringr::str_length(id)
-    if ( any(len > 6) ) stop("One or more station identifiers have more than 6 characters")
-
-    id <- stringr::str_pad(id, width = 6, side = "left", pad = "0")
-  }
-
-  id
 }
 
 
@@ -256,7 +218,7 @@
 # empty or all values are NA
 .max_with_na <- function(x) {
   # If all values are NA, return NA instead of -Inf
-  x <- na.omit(x)
+  x <- stats::na.omit(x)
   if (length(x) == 0) NA
   else max(x, na.rm = TRUE)
 }

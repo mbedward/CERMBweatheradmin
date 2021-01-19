@@ -167,10 +167,10 @@ bom_db_import <- function(db,
                            stations = NULL,
                            allow.missing = TRUE) {
 
-  info <- bom_dir_summary(dirpath)
+  info <- CERMBweather::bom_db_dir_summary(dirpath)
 
   if (!is.null(stations)) {
-    ids <- .station_id_to_text(stations)
+    ids <- CERMBweather::bom_db_station_id(stations)
     info <- dplyr::filter(info, station %in% ids)
   }
 
@@ -194,7 +194,7 @@ bom_db_import <- function(db,
   }
 
   dat <- tryCatch(
-    read.csv(filepath, stringsAsFactors = FALSE),
+    utils::read.csv(filepath, stringsAsFactors = FALSE),
     warning = function(w) NULL)
 
   if (is.null(dat)) {

@@ -16,6 +16,8 @@ Imports: CERMBweather (>= 0.3.1),
   dbplyr,
   dplyr,
   glue,
+  lubridate,
+  magrittr,
   pool,
   RPostgres,
   stringr
@@ -26,4 +28,4 @@ Suggests:
     knitr,
     rmarkdown,
     testthat (>= 2.1.0)
-VignetteBuilder: knitr
+License: MIT
