@@ -84,7 +84,7 @@ bom_db_import <- function(db,
   stopifnot(.get_db_type(db) == "postgresql")
 
   maintbl.name <- attr(dat, "datatype", exact = TRUE)
-  stopifnot(maintbl.name %in% c("aws", "synoptic"))
+  stopifnot(maintbl.name %in% c("aws", "synoptic", "upperair"))
 
   temptbl.name <- paste0(maintbl.name, "_temp")
 
