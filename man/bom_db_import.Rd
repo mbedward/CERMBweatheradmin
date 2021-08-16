@@ -38,7 +38,7 @@ names that include 'Data' followed by digits and underscores, with the file
 extension '.txt'. Any records that are duplicate those already in the
 database are silently ignored. Note that fire-related variables (KBDI,
 drought factor and FFDI) are \strong{not} calculated for the new records.
-call the function \code{bom_db_update_fire} to do this.
+\strong{TODO: link to the CERMBffdi package}
 }
 \examples{
 \dontrun{
@@ -62,7 +62,4 @@ bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 pool::poolClose(DB)
 }
 
-}
-\seealso{
-\code{\link{bom_db_update_fire}}
 }

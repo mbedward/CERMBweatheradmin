@@ -9,7 +9,7 @@
 #' extension '.txt'. Any records that are duplicate those already in the
 #' database are silently ignored. Note that fire-related variables (KBDI,
 #' drought factor and FFDI) are \strong{not} calculated for the new records.
-#' call the function \code{bom_db_update_fire} to do this.
+#' \strong{TODO: link to the CERMBffdi package}
 #'
 #' @param db A database connection pool object.
 #'
@@ -30,8 +30,6 @@
 #'   Note that completion of the process means only that the input data were
 #'   successfully read, not necessarily that new records were added to the
 #'   database.
-#'
-#' @seealso \code{\link{bom_db_update_fire}}
 #'
 #' @examples
 #' \dontrun{
@@ -69,7 +67,7 @@ bom_db_import <- function(db,
 
   .ensure_connection(db)
 
-  if (CERMBweather::bom_db_is_zip_file(datapath))
+  if (CERMBweather::bom_is_zip_file(datapath))
     .do_import_zip(db, datapath, stations, allow.missing)
 
   else if (file.info(datapath)$isdir)
@@ -144,14 +142,14 @@ bom_db_import <- function(db,
   .ensure_connection(db)
 
   # Check for empty zip file
-  info <- CERMBweather::bom_db_zip_summary(zipfile)
+  info <- CERMBweather::bom_zip_summary(zipfile)
   if (nrow(info) == 0) return(FALSE)
 
   if (is.null(stations)) {
     stations <- info[["station"]]
   }
 
-  dats <- CERMBweather::bom_db_zip_data(zipfile, stations, allow.missing)
+  dats <- CERMBweather::bom_zip_data(zipfile, stations, allow.missing)
 
   for (dat in dats) {
     .do_postgresql_import(db, dat)
@@ -167,17 +165,20 @@ bom_db_import <- function(db,
                            stations = NULL,
                            allow.missing = TRUE) {
 
-  info <- CERMBweather::bom_db_dir_summary(dirpath)
+  info <- CERMBweather::bom_dir_summary(dirpath)
 
   if (!is.null(stations)) {
-    ids <- CERMBweather::bom_db_station_id(stations)
+    ids <- CERMBweather::bom_station_id(stations)
     info <- dplyr::filter(info, station %in% ids)
   }
 
   if (nrow(info) > 0) {
     for (i in 1:nrow(info)) {
       if (info[[i, "filesize"]] > 0) {
-        filepath <- .safe_file_path(dirpath, info[[i, "filename"]])
+        # Use fs::path rather than base::file.path to ensure that
+        # consistent forward slashes are used as path separators
+        # regardless of input
+        filepath <- fs::path(dirpath, info[[i, "filename"]])
         .do_import_file(db, filepath)
       }
     }
@@ -200,20 +201,20 @@ bom_db_import <- function(db,
   if (is.null(dat)) {
     FALSE
   } else {
-    dat <- CERMBweather::bom_db_tidy_data(dat)
+    dat <- CERMBweather::bom_tidy_data(dat)
     .do_postgresql_import(db, dat)
     TRUE
   }
 }
 
 
-#' Gets a summary of database contents
+#' Get count of records.
 #'
-#' Gets the count of database records in the AWS and Synoptic tables. It can
-#' take forever to get an exact count of records, especially from a PostgreSQL
-#' database. Setting the \code{approx} argument to \code{TRUE} (default) will
-#' return a very fast, approximate total count. This argument is ignored if the
-#' function is called with \code{by = "station"}.
+#' Gets the count of records in the AWS and Synoptic tables. It can take forever
+#' to get an exact count of records, especially from a PostgreSQL database.
+#' Setting the \code{approx} argument to \code{TRUE} (default) will return a
+#' very fast, approximate total count. This argument is ignored if the function
+#' is called with \code{by = "station"}.
 #'
 #' @param db A database connection pool object.
 #'
@@ -231,7 +232,7 @@ bom_db_import <- function(db,
 #'
 #' @export
 #'
-bom_db_summary <- function(db, by = c("total", "station"), approx = TRUE) {
+bom_db_record_count <- function(db, by = c("total", "station"), approx = TRUE) {
   by = match.arg(by)
 
   dbtype <- .get_db_type(db)
@@ -343,7 +344,7 @@ bom_db_check_datetimes <- function(dat, daily) {
     }
 
     dat.stn <- dat.stn %>%
-      dplyr::mutate(date = .ymd_to_date(year, month, day))
+      dplyr::mutate(date = CERMBweather::ymd_to_date(year, month, day))
 
     # If only daily records are expected, check and return
     # early if that is not the case
