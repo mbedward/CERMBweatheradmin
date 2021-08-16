@@ -18,3 +18,11 @@ https://github.com/mbedward/CERMBweather
 **Note** Feel free to look at or use the code but (a) lots of things don't
 work yet, and (b) the functions here assume a particular database
 structure and conventions specific to BOM weather station data.
+
+```
+# Install the remotes package if not already present
+install.packages("remotes")
+
+remotes::install_github("mbedward/CERMBweatheradmin")
+
+```
