@@ -44,9 +44,10 @@ drought factor and FFDI) are \strong{not} calculated for the new records.
 \dontrun{
 # Connect to a PostgreSQL database using the pool package
 DB <- pool::dbPool(drv = RPostgres::Postgres(),
-                  host = "some.host.uow.edu.au",
-                  dbname = "cermb_weather",
-                  user = "myusername")
+                   host = "some.host.uow.edu.au",
+                   dbname = "cermb_weather",
+                   user = "admin_user_name",
+                   password = "admin_password")
 
 # Import data from a BOM zip file containing individuals CSV-format
 # data files for weather stations
