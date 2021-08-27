@@ -7,7 +7,8 @@
 bom_db_record_count(db, by = c("total", "station"), approx = TRUE)
 }
 \arguments{
-\item{db}{A database connection pool object.}
+\item{db}{A database connection object created with \code{pool::dbPool} or
+\code{DBI::dbConnect}.}
 
 \item{by}{One of 'total' for total records per table, or 'station' for
 count of records by weather station.}

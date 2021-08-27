@@ -7,7 +7,8 @@
 bom_db_import(db, datapath, stations = NULL, allow.missing = TRUE)
 }
 \arguments{
-\item{db}{A database connection pool object.}
+\item{db}{A database connection object created with \code{pool::dbPool} or
+\code{DBI::dbConnect}.}
 
 \item{datapath}{Character path to one of the following: an individual weather
 station data file in CSV format; a directory containing one or more data
@@ -42,12 +43,12 @@ drought factor and FFDI) are \strong{not} calculated for the new records.
 }
 \examples{
 \dontrun{
-# Connect to a PostgreSQL database using the pool package
-DB <- pool::dbPool(drv = RPostgres::Postgres(),
-                   host = "some.host.uow.edu.au",
-                   dbname = "cermb_weather",
-                   user = "admin_user_name",
-                   password = "admin_password")
+# Connect to a PostgreSQL database using an admin user name and password
+DB <- DBI::dbConnect(drv = RPostgres::Postgres(),
+                     host = "some.host.uow.edu.au",
+                     dbname = "cermb_weather",
+                     user = "admin_user_name",
+                     password = "admin_password")
 
 # Import data from a BOM zip file containing individuals CSV-format
 # data files for weather stations
@@ -60,7 +61,7 @@ bom_db_import(DB, "c:/bom/archive/aws_files/")
 bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 
 # Do other things, then at end of session...
-pool::poolClose(DB)
+DBI::dbDisconnect(DB)
 }
 
 }

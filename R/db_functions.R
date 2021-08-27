@@ -11,7 +11,8 @@
 #' drought factor and FFDI) are \strong{not} calculated for the new records.
 #' \strong{TODO: link to the CERMBffdi package}
 #'
-#' @param db A database connection pool object.
+#' @param db A database connection object created with \code{pool::dbPool} or
+#'   \code{DBI::dbConnect}.
 #'
 #' @param datapath Character path to one of the following: an individual weather
 #'   station data file in CSV format; a directory containing one or more data
@@ -33,12 +34,12 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Connect to a PostgreSQL database using the pool package
-#' DB <- pool::dbPool(drv = RPostgres::Postgres(),
-#'                    host = "some.host.uow.edu.au",
-#'                    dbname = "cermb_weather",
-#'                    user = "admin_user_name",
-#'                    password = "admin_password")
+#' # Connect to a PostgreSQL database using an admin user name and password
+#' DB <- DBI::dbConnect(drv = RPostgres::Postgres(),
+#'                      host = "some.host.uow.edu.au",
+#'                      dbname = "cermb_weather",
+#'                      user = "admin_user_name",
+#'                      password = "admin_password")
 #'
 #' # Import data from a BOM zip file containing individuals CSV-format
 #' # data files for weather stations
@@ -51,7 +52,7 @@
 #' bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 #'
 #' # Do other things, then at end of session...
-#' pool::poolClose(DB)
+#' DBI::dbDisconnect(DB)
 #' }
 #'
 #' @export
@@ -117,14 +118,27 @@ bom_db_import <- function(db,
     "DROP TABLE {temptbl.name};"
   )
 
-  pool::poolWithTransaction(db, function(conn) {
-    DBI::dbExecute(conn, sql.create_temp_table)
 
-    DBI::dbWriteTable(conn, temptbl.name, dat, overwrite = TRUE)
-    DBI::dbExecute(conn, sql.insert_recs)
+  if (.is_pool_connection(db)) {
+    pool::poolWithTransaction(db, function(conn) {
+      DBI::dbExecute(conn, sql.create_temp_table)
 
-    DBI::dbExecute(conn, sql.drop_temp_table)
-  })
+      DBI::dbWriteTable(conn, temptbl.name, dat, overwrite = TRUE)
+      DBI::dbExecute(conn, sql.insert_recs)
+
+      DBI::dbExecute(conn, sql.drop_temp_table)
+    })
+
+  } else if (.is_dbi_connection(db)) {
+    DBI::dbWithTransaction(db, {
+      DBI::dbExecute(db, sql.create_temp_table)
+
+      DBI::dbWriteTable(db, temptbl.name, dat, overwrite = TRUE)
+      DBI::dbExecute(db, sql.insert_recs)
+
+      DBI::dbExecute(db, sql.drop_temp_table)
+    })
+  }
 }
 
 
@@ -217,7 +231,8 @@ bom_db_import <- function(db,
 #' very fast, approximate total count. This argument is ignored if the function
 #' is called with \code{by = "station"}.
 #'
-#' @param db A database connection pool object.
+#' @param db A database connection object created with \code{pool::dbPool} or
+#'   \code{DBI::dbConnect}.
 #'
 #' @param by One of 'total' for total records per table, or 'station' for
 #'   count of records by weather station.
