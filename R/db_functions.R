@@ -253,6 +253,8 @@ bom_db_import <- function(db,
 #'   will be over-written. If \code{FALSE} (default), values will only be calculated for the most recent
 #'   records that do not already have FFDI values.
 #'
+#' @export
+#'
 bom_db_add_ffdi <- function(db,
                             tables = c("synoptic", "aws"),
                             states = c("NSW", "VIC", "ACT", "TAS", "QLD", "SA", "WA"),
@@ -378,10 +380,10 @@ bom_db_add_ffdi <- function(db,
             # Check that the time series is long enough
             ndays = max(dat$date_local) - min(dat$date_local)
             if (ndays > 21) {
-              res <- calculate_ffdi(dat,
-                                    av.rainfall = the.avrain,
-                                    datatype = the.table,
-                                    for.records = "all")
+              res <- CERMBffdi::calculate_ffdi(dat,
+                                               av.rainfall = the.avrain,
+                                               datatype = the.table,
+                                               for.records = "all")
 
               res <- res %>%
                 dplyr::select(station,
