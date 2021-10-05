@@ -39,12 +39,11 @@ names that include 'Data' followed by digits and underscores, with the file
 extension '.txt'. Any records that are duplicate those already in the
 database are silently ignored. Note that fire-related variables (KBDI,
 drought factor and FFDI) are \strong{not} calculated for the new records.
-\strong{TODO: link to the CERMBffdi package}
 }
 \examples{
 \dontrun{
 # Connect to a PostgreSQL database using an admin user name and password
-DB <- DBI::dbConnect(drv = RPostgres::Postgres(),
+db <- DBI::dbConnect(drv = RPostgres::Postgres(),
                      host = "some.host.uow.edu.au",
                      dbname = "cermb_weather",
                      user = "admin_user_name",
@@ -52,16 +51,16 @@ DB <- DBI::dbConnect(drv = RPostgres::Postgres(),
 
 # Import data from a BOM zip file containing individuals CSV-format
 # data files for weather stations
-bom_db_import(DB, "c:/bom/updates/some_aws.zip")
+bom_db_import(db, "c:/bom/updates/some_aws.zip")
 
 # Import data from CSV-format files in a directory
-bom_db_import(DB, "c:/bom/archive/aws_files/")
+bom_db_import(db, "c:/bom/archive/aws_files/")
 
 # Import data from an individual CSV-format weather station file
-bom_db_import(DB, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
+bom_db_import(db, "c:/foo/bar/HC06D_Data_068228_999999999515426.txt")
 
 # Do other things, then at end of session...
-DBI::dbDisconnect(DB)
+DBI::dbDisconnect(db)
 }
 
 }
