@@ -490,12 +490,12 @@ bom_db_add_ffdi <- function(db,
                     DBI::dbExecute(db, sql.create_temp_table)
                     DBI::dbWriteTable(db, temptbl.name, res, overwrite = TRUE)
 
-                    DBI::dbExecute(conn, sql.index_temp_table)
-                    DBI::dbExecute(conn, sql.analyze_temp_table)
+                    DBI::dbExecute(db, sql.index_temp_table)
+                    DBI::dbExecute(db, sql.analyze_temp_table)
 
-                    DBI::dbExecute(conn, sql.update_recs)
+                    DBI::dbExecute(db, sql.update_recs)
 
-                    DBI::dbExecute(conn, sql.drop_temp_table)
+                    DBI::dbExecute(db, sql.drop_temp_table)
                   })
                 }
 
