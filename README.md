@@ -18,10 +18,13 @@ Yet another related R package with functions to calculate fire-related variables
 from weather station records, including FFDI (Forest Fire Danger Index), can be
 found at https://github.com/mbedward/CERMBffdi
 
-**Note** Please feel free to look around, or use and adapt the code here. However,
-keep in mind that the functions in this package currently assume a particular database 
-structure, as well as data formatting conventions that are specific to the 
-Australian Bureau of Meteorology.
+**Note:** Please feel free to look around, and to use or adapt the code here.
+However, keep in mind that the functions in this package currently assume a
+particular database structure, as well as data formatting conventions that are
+specific to the Australian Bureau of Meteorology. If you would like to know more
+about the database structure, see the function `db_creation_script` that writes
+all of the SQL commands needed to create the database tables and views to a
+file.
 
 ```
 # Install the remotes package if not already present
