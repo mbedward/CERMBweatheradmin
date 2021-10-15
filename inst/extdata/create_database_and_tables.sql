@@ -309,36 +309,28 @@ CREATE INDEX idx_upperair_date_std
 -------------------------------------------------------
 -- Create the synoptic_stations view to provide a quick
 -- way of listing all stations with data records.
--- Note: this query uses a recursive CTE, so it looks 
--- horrible but is very fast to run.
 -------------------------------------------------------
 
 CREATE OR REPLACE VIEW bom.synoptic_stations
  AS
- SELECT sub.station,
-    stations.name,
-    stations.state
-   FROM ( WITH RECURSIVE t AS (
-                 SELECT min(synoptic.station) AS station
-                   FROM synoptic
-                UNION ALL
-                 SELECT ( SELECT min(synoptic.station) AS min
-                           FROM synoptic
-                          WHERE synoptic.station > t.station) AS min
-                   FROM t
-                  WHERE t.station IS NOT NULL
-                )
-         SELECT t.station
-           FROM t
-          WHERE t.station IS NOT NULL
-        UNION ALL
-         SELECT NULL::integer AS station
-          WHERE (EXISTS ( SELECT 1
-                   FROM synoptic
-                  WHERE synoptic.station IS NULL))) sub
-     LEFT JOIN stations ON sub.station = stations.station
-  ORDER BY sub.station;
-
+ SELECT s.station,
+    s.name,
+    s.state,
+    q1.first_date,
+    q2.last_date
+   FROM stations s
+     JOIN LATERAL ( SELECT synoptic.date_local AS first_date
+           FROM synoptic
+          WHERE synoptic.station = s.station
+          ORDER BY synoptic.date_local
+         LIMIT 1) q1 ON true
+     JOIN LATERAL ( SELECT synoptic.date_local AS last_date
+           FROM synoptic
+          WHERE synoptic.station = s.station
+          ORDER BY synoptic.date_local DESC
+         LIMIT 1) q2 ON true
+  ORDER BY s.state, s.station;
+  
 ALTER TABLE bom.synoptic_stations
     OWNER TO postgres;
 
@@ -348,35 +340,29 @@ GRANT ALL ON TABLE bom.synoptic_stations TO postgres;
 -------------------------------------------------------
 -- Create the aws_stations view to provide a quick
 -- way of listing all stations with data records.
--- Note: this query uses a recursive CTE, so it looks 
--- horrible but is very fast to run.
 -------------------------------------------------------
 
 CREATE OR REPLACE VIEW bom.aws_stations
- AS
- SELECT sub.station,
-    stations.name,
-    stations.state
-   FROM ( WITH RECURSIVE t AS (
-                 SELECT min(aws.station) AS station
-                   FROM aws
-                UNION ALL
-                 SELECT ( SELECT min(aws.station) AS min
-                           FROM aws
-                          WHERE aws.station > t.station) AS min
-                   FROM t
-                  WHERE t.station IS NOT NULL
-                )
-         SELECT t.station
-           FROM t
-          WHERE t.station IS NOT NULL
-        UNION ALL
-         SELECT NULL::integer AS station
-          WHERE (EXISTS ( SELECT 1
-                   FROM aws
-                  WHERE aws.station IS NULL))) sub
-     LEFT JOIN stations ON sub.station = stations.station
-  ORDER BY sub.station;
+AS
+SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
+FROM stations s
+JOIN LATERAL (
+    SELECT date_local AS first_date
+    FROM aws
+	WHERE aws.station = s.station
+	ORDER BY date_local ASC
+	LIMIT 1
+) q1
+ON true
+JOIN LATERAL (
+    SELECT date_local AS last_date
+    FROM aws
+	WHERE aws.station = s.station
+	ORDER BY date_local DESC
+	LIMIT 1
+) q2 
+ON true
+ORDER BY s.state, s.station;
 
 ALTER TABLE bom.aws_stations
     OWNER TO postgres;
@@ -387,37 +373,29 @@ GRANT ALL ON TABLE bom.aws_stations TO postgres;
 -------------------------------------------------------
 -- Create the upperair_stations view to provide a quick
 -- way of listing all stations with data records.
--- Note: this query uses a recursive CTE, so it looks 
--- horrible but is very fast to run (although there 
--- will probably only ever be a few stations with upper
--- air data).
 -------------------------------------------------------
 
 CREATE OR REPLACE VIEW bom.upperair_stations
- AS
- SELECT sub.station,
-    stations.name,
-    stations.state
-   FROM ( WITH RECURSIVE t AS (
-                 SELECT min(upperair.station) AS station
-                   FROM upperair
-                UNION ALL
-                 SELECT ( SELECT min(upperair.station) AS min
-                           FROM upperair
-                          WHERE upperair.station > t.station) AS min
-                   FROM t
-                  WHERE t.station IS NOT NULL
-                )
-         SELECT t.station
-           FROM t
-          WHERE t.station IS NOT NULL
-        UNION ALL
-         SELECT NULL::integer AS station
-          WHERE (EXISTS ( SELECT 1
-                   FROM upperair
-                  WHERE upperair.station IS NULL))) sub
-     LEFT JOIN stations ON sub.station = stations.station
-  ORDER BY sub.station;
+AS
+SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
+FROM stations s
+JOIN LATERAL (
+    SELECT date_local AS first_date
+    FROM upperair
+	WHERE upperair.station = s.station
+	ORDER BY date_local ASC
+	LIMIT 1
+) q1
+ON true
+JOIN LATERAL (
+    SELECT date_local AS last_date
+    FROM upperair
+	WHERE upperair.station = s.station
+	ORDER BY date_local DESC
+	LIMIT 1
+) q2 
+ON true
+ORDER BY s.state, s.station;
 
 ALTER TABLE bom.upperair_stations
     OWNER TO postgres;
