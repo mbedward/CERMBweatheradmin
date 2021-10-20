@@ -3,14 +3,14 @@
 -------------------------------------------
 
 CREATE DATABASE cermb_weather
-    WITH 
+    WITH
     OWNER = postgres
     ENCODING = 'UTF8'
     LC_COLLATE = 'English_Australia.1252'
     LC_CTYPE = 'English_Australia.1252'
     TABLESPACE = pg_default
     CONNECTION LIMIT = -1;
-	
+
 -- Add PostGIS support for spatial data and queries
 CREATE EXTENSION postgis;
 
@@ -107,14 +107,14 @@ CREATE INDEX idx_stations_state
     (state ASC NULLS LAST)
     TABLESPACE pg_default;
 
-	
+
 ---------------------------------
 -- Create the synoptic data table
 ---------------------------------
 
 CREATE TABLE bom.synoptic
 (
-    id serial PRIMARY KEY,
+    id bigserial PRIMARY KEY,
     station integer NOT NULL,
     date_local date NOT NULL,
     hour_local integer NOT NULL,
@@ -138,14 +138,14 @@ CREATE TABLE bom.synoptic
     drought real,
     ffdi real,
     ffdi_quality character(1),
-	
+
     CONSTRAINT synoptic_station_datetime_key UNIQUE (station, date_local, hour_local, min_local)
 )
 TABLESPACE pg_default;
 
 ALTER TABLE bom.synoptic
     OWNER to postgres;
-	
+
 GRANT ALL ON TABLE bom.synoptic TO postgres;
 
 -- Index on station number
@@ -168,7 +168,7 @@ CREATE INDEX idx_synoptic_date_std
     ON bom.synoptic USING btree
     (date_std ASC)
     TABLESPACE pg_default;
-	
+
 -- Index on non-null FFDI value
 
 CREATE INDEX idx_synoptic_has_ffdi
@@ -182,7 +182,7 @@ CREATE INDEX idx_synoptic_has_ffdi
 
 CREATE TABLE bom.aws
 (
-    id serial primary key,
+    id bigserial primary key,
     station integer NOT NULL,
     date_local date NOT NULL,
     hour_local integer NOT NULL,
@@ -208,7 +208,7 @@ CREATE TABLE bom.aws
     drought real,
     ffdi real,
     ffdi_quality character(1),
-    
+
     CONSTRAINT aws_station_datetime_key UNIQUE (station, date_local, hour_local, min_local)
 )
 TABLESPACE pg_default;
@@ -330,7 +330,7 @@ CREATE OR REPLACE VIEW bom.synoptic_stations
           ORDER BY synoptic.date_local DESC
          LIMIT 1) q2 ON true
   ORDER BY s.state, s.station;
-  
+
 ALTER TABLE bom.synoptic_stations
     OWNER TO postgres;
 
@@ -344,7 +344,7 @@ GRANT ALL ON TABLE bom.synoptic_stations TO postgres;
 
 CREATE OR REPLACE VIEW bom.aws_stations
 AS
-SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
+SELECT s.station, s.name, s.state, q1.first_date, q2.last_date
 FROM stations s
 JOIN LATERAL (
     SELECT date_local AS first_date
@@ -360,7 +360,7 @@ JOIN LATERAL (
 	WHERE aws.station = s.station
 	ORDER BY date_local DESC
 	LIMIT 1
-) q2 
+) q2
 ON true
 ORDER BY s.state, s.station;
 
@@ -377,7 +377,7 @@ GRANT ALL ON TABLE bom.aws_stations TO postgres;
 
 CREATE OR REPLACE VIEW bom.upperair_stations
 AS
-SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
+SELECT s.station, s.name, s.state, q1.first_date, q2.last_date
 FROM stations s
 JOIN LATERAL (
     SELECT date_local AS first_date
@@ -393,7 +393,7 @@ JOIN LATERAL (
 	WHERE upperair.station = s.station
 	ORDER BY date_local DESC
 	LIMIT 1
-) q2 
+) q2
 ON true
 ORDER BY s.state, s.station;
 
@@ -405,9 +405,9 @@ GRANT ALL ON TABLE bom.upperair_stations TO postgres;
 
 --------------------------------------------------------------
 -- Create a materialized view that shows, for each station
--- in the synoptic data table, the first and last dates 
--- (based on local time) of records with non-null FFDI values. 
--- This is used by the external (R) routines that calculate 
+-- in the synoptic data table, the first and last dates
+-- (based on local time) of records with non-null FFDI values.
+-- This is used by the external (R) routines that calculate
 -- FFDI for newly added records.
 --------------------------------------------------------------
 
@@ -445,13 +445,13 @@ CREATE UNIQUE INDEX idx_synoptic_ffdi_station
     ON bom.synoptic_ffdi_dates USING btree
     (station)
     TABLESPACE pg_default;
-	
+
 
 --------------------------------------------------------------
 -- Create a materialized view that shows, for each station
--- in the aws data table, the first and last dates 
--- (based on local time) of records with non-null FFDI values. 
--- This is used by the external (R) routines that calculate 
+-- in the aws data table, the first and last dates
+-- (based on local time) of records with non-null FFDI values.
+-- This is used by the external (R) routines that calculate
 -- FFDI for newly added records.
 --------------------------------------------------------------
 
