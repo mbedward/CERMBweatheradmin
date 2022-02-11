@@ -1,7 +1,7 @@
 Package: CERMBweatheradmin
 Title: Functions to manage a PostgreSQL database of weather station records
-Version: 0.6.3
-Date: 2021-10-20
+Version: 0.6.4
+Date: 2022-02-11
 Authors@R: c(
   person("Hamish", "Clarke", email = "hamishc@uow.edu.au", role = c("aut")),
   person("Michael", "Bedward", email = "michael.bedward@gmail.com", role = c("aut", "cre")) )
@@ -25,7 +25,7 @@ Imports: DBI,
   stringr
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.1.1
+RoxygenNote: 7.1.2
 Suggests: 
     knitr,
     rmarkdown,
