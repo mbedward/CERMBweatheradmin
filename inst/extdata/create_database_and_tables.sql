@@ -73,7 +73,7 @@ CREATE TABLE bom.stations
 (
     station integer NOT NULL,
     name text NOT NULL,
-    state character(3) NOT NULL,
+    state text NOT NULL,
     startyear integer,
     startmonth integer,
     aws boolean NOT NULL,
@@ -251,7 +251,7 @@ CREATE INDEX idx_aws_has_ffdi
 ---------------------------------
 CREATE TABLE IF NOT EXISTS bom.upperair
 (
-    id serial PRIMARY KEY,
+    id bigserial PRIMARY KEY,
     station integer NOT NULL,
     date_local date NOT NULL,
     hour_local integer NOT NULL,
@@ -515,4 +515,46 @@ ALTER FUNCTION bom.get_ffdi_category(real)
     OWNER TO postgres;
 
 GRANT EXECUTE ON FUNCTION bom.get_ffdi_category(real) TO postgres;
+
+
+-------------------------------------------------------------
+-- Functions to calculate vapour pressure deficit.
+--
+-- Function 'vpd3' returns a tuple of three values:
+--   vpactual, vpsaturation, vpdeficit
+--
+-- Example usage:
+-- select station, date_local, hour_local, min_local,
+--		temperature, relhumidity, (vpd3(temperature, relhumidity)).*
+-- from synoptic
+-- where station = 68228 and date_local >= '2022-01-01'::date;
+--
+-- Function 'vpd' is a convenience wrapper to only return
+-- the vapour pressure deficit value.
+--
+-- Example usage:
+-- select station, date_local, hour_local, min_local,
+--		temperature, relhumidity, vpd(temperature, relhumidity)
+-- from synoptic
+-- where station = 68228 and date_local >= '2022-01-01'::date;
+--
+-------------------------------------------------------------
+
+-- Function to return tuple of vpd component values
+CREATE OR REPLACE FUNCTION bom.vpd3(IN temperature real, IN relhumidity real,
+								   OUT vpactual real, OUT vpsaturation real, OUT vpdeficit real) AS
+$$
+BEGIN
+	vpsaturation := 0.6108 * exp(17.27 * temperature / (temperature + 237.3));
+	vpactual := vpsaturation * relhumidity / 100;
+	vpdeficit := vpactual - vpsaturation;
+END
+$$ LANGUAGE 'plpgsql';
+
+
+-- Function to return just the vp deficit value
+CREATE OR REPLACE FUNCTION bom.vpd(temperature real, relhumidity real) RETURNS real AS
+$$
+	SELECT (vpd3(temperature, relhumidity)).vpdeficit;
+$$ LANGUAGE 'sql';
 
