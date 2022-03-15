@@ -12,7 +12,7 @@
 #' @export
 #'
 db_creation_script <- function(dest = "dbcreate.sql") {
-  ok <- file.copy(from = system.file("extdata", "create_database_and_tables.sql",
+  ok <- file.copy(from = system.file("extdata", "create_cermb_weather_db.sql",
                                      package = "CERMBweatheradmin"),
                   to = dest,
                   overwrite = TRUE)
