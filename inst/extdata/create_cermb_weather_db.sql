@@ -522,20 +522,21 @@ GRANT EXECUTE ON FUNCTION bom.get_ffdi_category(real) TO postgres;
 --
 -- Function 'vpd3' returns a tuple of three values:
 --   vpactual, vpsaturation, vpdeficit
+-- where the units for all values are kPa.
 --
 -- Example usage:
--- select station, date_local, hour_local, min_local, 
+-- select station, date_local, hour_local, min_local,
 --		temperature, relhumidity, (vpd3(temperature, relhumidity)).*
--- from synoptic 
+-- from synoptic
 -- where station = 68228 and date_local >= '2022-01-01'::date;
 --
 -- Function 'vpd' is a convenience wrapper to only return
 -- the vapour pressure deficit value.
 --
 -- Example usage:
--- select station, date_local, hour_local, min_local, 
+-- select station, date_local, hour_local, min_local,
 --		temperature, relhumidity, vpd(temperature, relhumidity)
--- from synoptic 
+-- from synoptic
 -- where station = 68228 and date_local >= '2022-01-01'::date;
 --
 -------------------------------------------------------------
@@ -547,7 +548,7 @@ $$
 BEGIN
 	vpsaturation := 0.6108 * exp(17.27 * temperature / (temperature + 237.3));
 	vpactual := vpsaturation * relhumidity / 100;
-	vpdeficit := vpactual - vpsaturation;
+	vpdeficit := vpsaturation - vpactual;
 END
 $$ LANGUAGE 'plpgsql';
 
