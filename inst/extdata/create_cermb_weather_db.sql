@@ -311,25 +311,26 @@ CREATE INDEX idx_upperair_date_std
 -- way of listing all stations with data records.
 -------------------------------------------------------
 
-CREATE OR REPLACE VIEW bom.synoptic_stations
- AS
- SELECT s.station,
+CREATE OR REPLACE VIEW bom.synoptic_stations AS
+SELECT s.station,
     s.name,
     s.state,
-    q1.first_date,
-    q2.last_date
-   FROM stations s
-     JOIN LATERAL ( SELECT synoptic.date_local AS first_date
-           FROM synoptic
-          WHERE synoptic.station = s.station
-          ORDER BY synoptic.date_local
-         LIMIT 1) q1 ON true
-     JOIN LATERAL ( SELECT synoptic.date_local AS last_date
-           FROM synoptic
-          WHERE synoptic.station = s.station
-          ORDER BY synoptic.date_local DESC
-         LIMIT 1) q2 ON true
-  ORDER BY s.state, s.station;
+    first_date,
+    last_date
+FROM stations s,
+LATERAL ( 
+    SELECT s1.date_local AS first_date
+    FROM synoptic s1
+    WHERE s1.station = s.station
+    ORDER BY s1.date_local
+    LIMIT 1) lat1,
+LATERAL ( 
+    SELECT s2.date_local AS last_date
+    FROM synoptic s2
+    WHERE s2.station = s.station
+    ORDER BY s2.date_local DESC
+    LIMIT 1) lat2
+ORDER BY s.state, s.station;
   
 ALTER TABLE bom.synoptic_stations
     OWNER TO postgres;
@@ -342,26 +343,25 @@ GRANT ALL ON TABLE bom.synoptic_stations TO postgres;
 -- way of listing all stations with data records.
 -------------------------------------------------------
 
-CREATE OR REPLACE VIEW bom.aws_stations
-AS
-SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
-FROM stations s
-JOIN LATERAL (
-    SELECT date_local AS first_date
-    FROM aws
-	WHERE aws.station = s.station
-	ORDER BY date_local ASC
-	LIMIT 1
-) q1
-ON true
-JOIN LATERAL (
-    SELECT date_local AS last_date
-    FROM aws
-	WHERE aws.station = s.station
-	ORDER BY date_local DESC
-	LIMIT 1
-) q2 
-ON true
+CREATE OR REPLACE VIEW bom.aws_stations AS
+SELECT s.station,
+    s.name,
+    s.state,
+    first_date,
+    last_date
+FROM stations s,
+LATERAL ( 
+    SELECT a1.date_local AS first_date
+    FROM aws a1
+    WHERE a1.station = s.station
+    ORDER BY a1.date_local
+    LIMIT 1) lat1,
+LATERAL ( 
+    SELECT a2.date_local AS last_date
+    FROM aws a2
+    WHERE a2.station = s.station
+    ORDER BY a2.date_local DESC
+    LIMIT 1) lat2
 ORDER BY s.state, s.station;
 
 ALTER TABLE bom.aws_stations
@@ -375,26 +375,25 @@ GRANT ALL ON TABLE bom.aws_stations TO postgres;
 -- way of listing all stations with data records.
 -------------------------------------------------------
 
-CREATE OR REPLACE VIEW bom.upperair_stations
-AS
-SELECT s.station, s.name, s.state, q1.first_date, q2.last_date 
-FROM stations s
-JOIN LATERAL (
-    SELECT date_local AS first_date
-    FROM upperair
-	WHERE upperair.station = s.station
-	ORDER BY date_local ASC
-	LIMIT 1
-) q1
-ON true
-JOIN LATERAL (
-    SELECT date_local AS last_date
-    FROM upperair
-	WHERE upperair.station = s.station
-	ORDER BY date_local DESC
-	LIMIT 1
-) q2 
-ON true
+CREATE OR REPLACE VIEW bom.upperair_stations AS
+SELECT s.station,
+    s.name,
+    s.state,
+    first_date,
+    last_date
+FROM stations s,
+LATERAL ( 
+    SELECT u1.date_local AS first_date
+    FROM upperair u1
+    WHERE u1.station = s.station
+    ORDER BY u1.date_local
+    LIMIT 1) lat1,
+LATERAL ( 
+    SELECT u2.date_local AS last_date
+    FROM upperair u2
+    WHERE u2.station = s.station
+    ORDER BY u2.date_local DESC
+    LIMIT 1) lat2
 ORDER BY s.state, s.station;
 
 ALTER TABLE bom.upperair_stations
@@ -411,27 +410,24 @@ GRANT ALL ON TABLE bom.upperair_stations TO postgres;
 -- FFDI for newly added records.
 --------------------------------------------------------------
 
-CREATE MATERIALIZED VIEW bom.synoptic_ffdi_dates
-TABLESPACE pg_default
-AS
- SELECT syns.station,
-    stns.name,
-    stns.state,
-    sub1.first_ffdi_date,
-    sub2.last_ffdi_date
-   FROM synoptic_stations syns
-     JOIN LATERAL ( SELECT syn1.date_local AS first_ffdi_date
-           FROM synoptic syn1
-          WHERE syn1.station = syns.station AND syn1.ffdi IS NOT NULL
-          ORDER BY syn1.date_local
-         LIMIT 1) sub1 ON true
-     JOIN LATERAL ( SELECT syn2.date_local AS last_ffdi_date
-           FROM synoptic syn2
-          WHERE syn2.station = syns.station AND syn2.ffdi IS NOT NULL
-          ORDER BY syn2.date_local DESC
-         LIMIT 1) sub2 ON true
-     LEFT JOIN stations stns ON syns.station = stns.station
-  ORDER BY syns.station
+CREATE MATERIALIZED VIEW bom.synoptic_ffdi_dates AS
+SELECT syns.station, 
+    syns.name, syns.state,
+    lat1.first_ffdi_date, lat2.last_ffdi_date
+FROM synoptic_stations syns,
+LATERAL ( 
+    SELECT s1.date_local AS first_ffdi_date
+    FROM synoptic s1
+    WHERE s1.station = syns.station AND s1.ffdi IS NOT NULL
+    ORDER BY s1.date_local
+    LIMIT 1) lat1,
+LATERAL ( 
+    SELECT s2.date_local AS last_ffdi_date
+    FROM synoptic s2
+    WHERE s2.station = syns.station AND s2.ffdi IS NOT NULL
+    ORDER BY s2.date_local DESC
+    LIMIT 1) lat2
+ORDER BY syns.station
 WITH DATA;
 
 ALTER TABLE bom.synoptic_ffdi_dates
@@ -455,27 +451,24 @@ CREATE UNIQUE INDEX idx_synoptic_ffdi_station
 -- FFDI for newly added records.
 --------------------------------------------------------------
 
-CREATE MATERIALIZED VIEW bom.aws_ffdi_dates
-TABLESPACE pg_default
-AS
- SELECT aws_stations.station,
-    stns.name,
-    stns.state,
-    sub1.first_ffdi_date,
-    sub2.last_ffdi_date
-   FROM aws_stations
-     JOIN LATERAL ( SELECT a1.date_local AS first_ffdi_date
-           FROM aws a1
-          WHERE a1.station = aws_stations.station AND a1.ffdi IS NOT NULL
-          ORDER BY a1.date_local
-         LIMIT 1) sub1 ON true
-     JOIN LATERAL ( SELECT a2.date_local AS last_ffdi_date
-           FROM aws a2
-          WHERE a2.station = aws_stations.station AND a2.ffdi IS NOT NULL
-          ORDER BY a2.date_local DESC
-         LIMIT 1) sub2 ON true
-     LEFT JOIN stations stns ON aws_stations.station = stns.station
-  ORDER BY aws_stations.station
+CREATE MATERIALIZED VIEW bom.aws_ffdi_dates AS
+SELECT a.station, 
+    a.name, a.state,
+    lat1.first_ffdi_date, lat2.last_ffdi_date
+FROM aws_stations a,
+LATERAL ( 
+    SELECT a1.date_local AS first_ffdi_date
+    FROM aws a1
+    WHERE a1.station = a.station AND a1.ffdi IS NOT NULL
+    ORDER BY a1.date_local
+    LIMIT 1) lat1,
+LATERAL ( 
+    SELECT a2.date_local AS last_ffdi_date
+    FROM aws a2
+    WHERE a2.station = a.station AND a2.ffdi IS NOT NULL
+    ORDER BY a2.date_local DESC
+    LIMIT 1) lat2
+ORDER BY a.station
 WITH DATA;
 
 ALTER TABLE bom.aws_ffdi_dates

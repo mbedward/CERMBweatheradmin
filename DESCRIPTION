@@ -1,7 +1,7 @@
 Package: CERMBweatheradmin
 Title: Functions to manage a PostgreSQL database of weather station records
-Version: 0.6.5
-Date: 2022-03-15
+Version: 0.6.6
+Date: 2022-07-05
 Authors@R: c(
   person("Hamish", "Clarke", email = "hamishc@uow.edu.au", role = c("aut")),
   person("Michael", "Bedward", email = "michael.bedward@gmail.com", role = c("aut", "cre")) )
