@@ -358,10 +358,14 @@ bom_db_add_ffdi <- function(db,
               date0 <- as.Date(the.latest_date) - 90
             }
 
-            cmd <- glue::glue("SELECT * FROM {the.table}
-                             WHERE station = {the.station} AND
-                               date_local >= '{date0}'::date
-                             ORDER BY date_local, hour_local, min_local;")
+            cmd <- glue::glue("SELECT station,
+                                 date_local as date, hour_local as hour, min_local as minute,
+ 	                               precipitation, temperature, relhumidity, windspeed,
+	                               tmaxdaily, precipdaily, kbdi, drought, ffdi
+                               FROM {the.table}
+                               WHERE station = {the.station} AND
+                                 date_local >= '{date0}'::date
+                               ORDER BY date, hour, minute;")
 
             dat <- DBI::dbGetQuery(db, cmd)
             Ndata_recs <- nrow(dat)
@@ -369,13 +373,13 @@ bom_db_add_ffdi <- function(db,
             if (Ndata_recs == 0) {
               # This should never happen because the query for selected stations
               # is based on the data table - so if we are here something
-              # has gone bady wrong!
+              # has gone badly pear shaped...
               msg <- glue::glue("Bummer - no data for {the.table} station {the.station}
                                even though there should be")
               stop(msg)
             }
 
-            the.earliest_date <- dat$date_local[1]
+            the.earliest_date <- dat$date[1]
 
             # Check that the time series is long enough
             ndays = max(dat$date_local) - min(dat$date_local)
@@ -426,9 +430,11 @@ bom_db_add_ffdi <- function(db,
               #
               if (!recalculate) {
                 res <- dat %>%
-                  dplyr::transmute(date_local, hour_local, min_local, had_ffdi = !is.na(ffdi)) %>%
+                  # Use mutate with .keep = 'none' to get just the time columns and a flag
+                  # for existing FFDI value
+                  dplyr::mutate(date, hour, min, had_ffdi = !is.na(ffdi), .keep = "none") %>%
 
-                  dplyr::left_join(res, by = c("date_local", "hour_local", "min_local")) %>%
+                  dplyr::left_join(res, by = c("date", "hour", "min")) %>%
 
                   # Retain records that have FFDI in `res` but did not in `dat`
                   dplyr::filter(!is.na(ffdi), !had_ffdi) %>%
@@ -466,9 +472,9 @@ bom_db_add_ffdi <- function(db,
                 ffdi_quality = t.ffdi_quality
                 FROM {temptbl.name} t
                 WHERE m.station = t.station
-                AND m.date_local = t.date_local
-                AND m.hour_local = t.hour_local
-                AND m.min_local = t.min_local;")
+                AND m.date_local = t.date
+                AND m.hour_local = t.hour
+                AND m.min_local = t.min;")
 
                 sql.drop_temp_table <- glue::glue("
                 DROP TABLE {temptbl.name};")
