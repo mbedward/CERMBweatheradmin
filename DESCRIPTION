@@ -12,7 +12,7 @@ Description: Tools developed by the Centre for Environmental Risk Management
   Danger Index..
 Depends: R (>= 4.0.0),
   CERMBweather (>= 0.5.3),
-  CERMBffdi (>= 0.1.6)
+  CERMBffdi (>= 0.1.7)
 Imports: DBI,
   dbplyr,
   dplyr,
